@@ -61,7 +61,9 @@ class V2rayNG
             "path" => "",
             "tls" => $server['tls'] ? "tls" : "",
         ];
+        if (isset($server['networkSettings']['uuid'])) $config['id'] = $server['networkSettings']['uuid'];
         if ($server['tls']) {
+            $config['scy'] = "zero";
             if ($server['tlsSettings']) {
                 $tlsSettings = $server['tlsSettings'];
                 if (isset($tlsSettings['serverName']) && !empty($tlsSettings['serverName']))
@@ -97,6 +99,4 @@ class V2rayNG
         $uri .= "\r\n";
         return $uri;
     }
-
-
 }
