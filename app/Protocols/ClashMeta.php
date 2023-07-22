@@ -26,7 +26,7 @@ class ClashMeta
         header('profile-update-interval: 24');
         header("content-disposition:attachment;filename*=UTF-8''".rawurlencode($appName));
         $defaultConfig = base_path() . '/resources/rules/default.clash.yaml';
-        $customConfig = base_path() . '/resources/rules/custom.clash.yaml';
+        $customConfig = base_path() . '/resources/rules/custom2.clash.yaml';
         if (\File::exists($customConfig)) {
             $config = Yaml::parseFile($customConfig);
         } else {
@@ -46,6 +46,14 @@ class ClashMeta
             }
             if ($item['type'] === 'trojan') {
                 array_push($proxy, self::buildTrojan($user['uuid'], $item));
+                array_push($proxies, $item['name']);
+            }
+            if ($item['type'] === 'hysteria') {
+                array_push($proxy, self::buildHysteria($user['uuid'], $item));
+                array_push($proxies, $item['name']);
+            }
+            if ($item['type'] === 'vless') {
+                array_push($proxy, self::buildVless($user['uuid'], $item));
                 array_push($proxies, $item['name']);
             }
         }
@@ -106,7 +114,7 @@ class ClashMeta
         return $array;
     }
 
-    public static function buildVmess($uuid, $server)
+   public static function buildVmess($uuid, $server)
     {
         $array = [];
         $array['name'] = $server['name'];
@@ -120,6 +128,8 @@ class ClashMeta
 
         if ($server['tls']) {
             $array['tls'] = true;
+            //如果开启tls，下发zero加密
+            $array['cipher'] = 'zero';
             if ($server['tlsSettings']) {
                 $tlsSettings = $server['tlsSettings'];
                 if (isset($tlsSettings['allowInsecure']) && !empty($tlsSettings['allowInsecure']))
@@ -133,21 +143,25 @@ class ClashMeta
             if (isset($tcpSettings['header']['type'])) $array['network'] = $tcpSettings['header']['type'];
             if (isset($tcpSettings['header']['request']['path'][0])) $array['http-opts']['path'] = $tcpSettings['header']['request']['path'][0];
         }
+        //websocket 0-rtt
         if ($server['network'] === 'ws') {
             $array['network'] = 'ws';
             if ($server['networkSettings']) {
                 $wsSettings = $server['networkSettings'];
                 $array['ws-opts'] = [];
                 if (isset($wsSettings['path']) && !empty($wsSettings['path']))
-                    $array['ws-opts']['path'] = $wsSettings['path'];
+                    $array['ws-opts']['path'] = "${wsSettings['path']}?ed=4096";
                 if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
                     $array['ws-opts']['headers'] = ['Host' => $wsSettings['headers']['Host']];
                 if (isset($wsSettings['path']) && !empty($wsSettings['path']))
-                    $array['ws-path'] = $wsSettings['path'];
+                    $array['ws-path'] = "${wsSettings['path']}?ed=4096";
                 if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
                     $array['ws-headers'] = ['Host' => $wsSettings['headers']['Host']];
             }
+            $array['max-early-data'] = 4096;
+            $array['early-data-header-name'] = 'Sec-WebSocket-Protocol';
         }
+        
         if ($server['network'] === 'grpc') {
             $array['network'] = 'grpc';
             if ($server['networkSettings']) {
@@ -171,6 +185,97 @@ class ClashMeta
         $array['udp'] = true;
         if (!empty($server['server_name'])) $array['sni'] = $server['server_name'];
         if (!empty($server['allow_insecure'])) $array['skip-cert-verify'] = ($server['allow_insecure'] ? true : false);
+        return $array;
+    }
+
+    public static function buildHysteria($password, $server)
+    {
+     	$array = [];
+        $array['name'] = $server['name'];
+        $array['type'] = 'hysteria';
+        $array['server'] = $server['host'];
+        $array['port'] = $server['port'];
+        $array['auth_str'] = $password;
+//        $array['obfs'] = $server['server_key'];
+        $array['protocol'] = 'udp';
+        $array['up'] = $server['up_mbps'];
+        $array['down'] = $server['down_mbps'];
+        if (!empty($server['server_name'])) $array['sni'] = $server['server_name'];
+        $array['skip-cert-verify'] = !empty($server['insecure']) ? true : false;
+        return $array;
+    }
+    
+    public static function buildVless($uuid, $server)
+    {
+        $array = [];
+        $array['name'] = $server['name'];
+        $array['type'] = 'vless';
+        $array['server'] = $server['host'];
+        $array['port'] = $server['port'];
+        $array['uuid'] = $uuid;
+        // // $array['uuid'] = '9e707b51-ac28-4e7e-a478-9319f49f7141';
+        // // $array['alterId'] = 0;
+        // // $array['cipher'] = 'auto';
+        $array['udp'] = true;
+        $array['network'] = $server['network'];
+        // //VLESS原则上强制开启TLS！！！
+        // if ($server['tls']) {
+            $array['tls'] = true;
+        //reality配置见tcp
+            if ($server['tls_settings']) {
+                $tlsSettings = $server['tls_settings'];
+                if (isset($tlsSettings['allow_insecure']) && !empty($tlsSettings['allow_insecure']))
+                    $array['skip-cert-verify'] = ($tlsSettings['allow_insecure'] ? true : false);
+                if (isset($tlsSettings['server_name']) && !empty($tlsSettings['server_name']))
+                    $array['servername'] = $tlsSettings['server_name'];
+            }
+        // }
+        // //流控
+        if ($server['flow']){
+            $array['flow'] = $server['flow'];
+        }
+        if ($server['network'] === 'tcp') {
+            $tcpSettings = $server['network_settings'];
+            if (isset($tcpSettings['header']['type'])) $array['network'] = $tcpSettings['header']['type'];
+            if (isset($tcpSettings['header']['request']['path'][0])) $array['http-opts']['path'] = $tcpSettings['header']['request']['path'][0];
+            //tcp-reality配置
+            if (isset($server['tls_settings']['reality']) && !empty($server['tls_settings']['reality'])){
+                $array['reality-opts'] = [];
+                if (isset($tcpSettings['public-key']) && !empty($tcpSettings['public-key']))
+                    $array['reality-opts']['public-key'] = "${tcpSettings['public-key']}";
+                if (isset($tcpSettings['short-id']) && !empty($tcpSettings['short-id']))
+                    $array['reality-opts']['short-id'] = "${tcpSettings['short-id']}";
+                $array['client-fingerprint'] = 'chrome';
+            }
+        }
+        // //websocket 0-rtt
+        // if ($server['network'] === 'ws') {
+        //     $array['network'] = 'ws';
+        //     if ($server['networkSettings']) {
+        //         $wsSettings = $server['networkSettings'];
+        //         $array['ws-opts'] = [];
+        //         if (isset($wsSettings['path']) && !empty($wsSettings['path']))
+        //             $array['ws-opts']['path'] = "${wsSettings['path']}?ed=4096";
+        //         if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
+        //             $array['ws-opts']['headers'] = ['Host' => $wsSettings['headers']['Host']];
+        //         if (isset($wsSettings['path']) && !empty($wsSettings['path']))
+        //             $array['ws-path'] = "${wsSettings['path']}?ed=4096";
+        //         if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
+        //             $array['ws-headers'] = ['Host' => $wsSettings['headers']['Host']];
+        //     }
+        //     $array['max-early-data'] = 4096;
+        //     $array['early-data-header-name'] = 'Sec-WebSocket-Protocol';
+        // }
+        
+        // if ($server['network'] === 'grpc') {
+        //     $array['network'] = 'grpc';
+        //     if ($server['networkSettings']) {
+        //         $grpcSettings = $server['networkSettings'];
+        //         $array['grpc-opts'] = [];
+        //         if (isset($grpcSettings['serviceName'])) $array['grpc-opts']['grpc-service-name'] = $grpcSettings['serviceName'];
+        //     }
+        // }
+
         return $array;
     }
 
