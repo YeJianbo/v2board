@@ -73,7 +73,9 @@ class V2rayN
             "path" => "",
             "tls" => $server['tls'] ? "tls" : "",
         ];
+        if (isset($server['networkSettings']['uuid'])) $config['id'] = $server['networkSettings']['uuid'];
         if ($server['tls']) {
+            $config['scy'] = "zero";
             if ($server['tlsSettings']) {
                 $tlsSettings = $server['tlsSettings'];
                 if (isset($tlsSettings['serverName']) && !empty($tlsSettings['serverName']))
