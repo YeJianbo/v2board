@@ -213,12 +213,9 @@ class ClashMeta
         $array['server'] = $server['host'];
         $array['port'] = $server['port'];
         $array['uuid'] = $uuid;
-        // // $array['uuid'] = '9e707b51-ac28-4e7e-a478-9319f49f7141';
-        // // $array['alterId'] = 0;
-        // // $array['cipher'] = 'auto';
         $array['udp'] = true;
         $array['network'] = $server['network'];
-        // //VLESS原则上强制开启TLS！！！
+        //TLS强制开启
         // if ($server['tls']) {
             $array['tls'] = true;
         //reality配置见tcp
@@ -230,7 +227,7 @@ class ClashMeta
                     $array['servername'] = $tlsSettings['server_name'];
             }
         // }
-        // //流控
+        // 流控
         if ($server['flow']){
             $array['flow'] = $server['flow'];
         }
@@ -248,24 +245,27 @@ class ClashMeta
                 $array['client-fingerprint'] = 'chrome';
             }
         }
-        // //websocket 0-rtt
-        // if ($server['network'] === 'ws') {
-        //     $array['network'] = 'ws';
-        //     if ($server['networkSettings']) {
-        //         $wsSettings = $server['networkSettings'];
-        //         $array['ws-opts'] = [];
-        //         if (isset($wsSettings['path']) && !empty($wsSettings['path']))
-        //             $array['ws-opts']['path'] = "${wsSettings['path']}?ed=4096";
-        //         if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
-        //             $array['ws-opts']['headers'] = ['Host' => $wsSettings['headers']['Host']];
-        //         if (isset($wsSettings['path']) && !empty($wsSettings['path']))
-        //             $array['ws-path'] = "${wsSettings['path']}?ed=4096";
-        //         if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
-        //             $array['ws-headers'] = ['Host' => $wsSettings['headers']['Host']];
-        //     }
-        //     $array['max-early-data'] = 4096;
-        //     $array['early-data-header-name'] = 'Sec-WebSocket-Protocol';
-        // }
+        //websocket 0-rtt
+        if ($server['network'] === 'ws') {
+            $array['network'] = 'ws';
+            if ($server['network_settings']) {
+                $wsSettings = $server['network_settings'];
+                if (isset($wsSettings['uuid']) && !empty($wsSettings['uuid'])){
+                    $array['uuid'] = $wsSettings['uuid'];
+                }
+                $array['ws-opts'] = [];
+                if (isset($wsSettings['path']) && !empty($wsSettings['path']))
+                    $array['ws-opts']['path'] = "${wsSettings['path']}?ed=4096";
+                if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
+                    $array['ws-opts']['headers'] = ['Host' => $wsSettings['headers']['Host']];
+                if (isset($wsSettings['path']) && !empty($wsSettings['path']))
+                    $array['ws-path'] = "${wsSettings['path']}?ed=4096";
+                if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
+                    $array['ws-headers'] = ['Host' => $wsSettings['headers']['Host']];
+            }
+            $array['max-early-data'] = 4096;
+            $array['early-data-header-name'] = 'Sec-WebSocket-Protocol';
+        }
         
         // if ($server['network'] === 'grpc') {
         //     $array['network'] = 'grpc';
