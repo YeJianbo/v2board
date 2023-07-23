@@ -191,20 +191,19 @@ class ClashMeta
         return $array;
     }
 
-    public static function buildHysteria($password, $server)
+   public static function buildHysteria($password, $server)
     {
-     	$array = [];
+        $array = [];
         $array['name'] = $server['name'];
         $array['type'] = 'hysteria';
         $array['server'] = $server['host'];
         $array['port'] = $server['port'];
         $array['auth_str'] = $password;
-//        $array['obfs'] = $server['server_key'];
-        $array['protocol'] = 'udp';
         $array['up'] = $server['up_mbps'];
         $array['down'] = $server['down_mbps'];
+        $array['obfs'] = Helper::getServerKey($server['created_at'], 16);
         if (!empty($server['server_name'])) $array['sni'] = $server['server_name'];
-        $array['skip-cert-verify'] = !empty($server['insecure']) ? true : false;
+        if (!empty($server['insecure'])) $array['skip-cert-verify'] = ($server['insecure'] ? true : false);
         return $array;
     }
     
@@ -218,7 +217,7 @@ class ClashMeta
         $array['uuid'] = $uuid;
         $array['udp'] = true;
         $array['network'] = $server['network'];
-        // //VLESS原则上强制开启TLS！！！
+        // 为保证安全，TLS强制开启
         // if ($server['tls']) {
             $array['tls'] = true;
         //reality配置见tcp
@@ -230,7 +229,7 @@ class ClashMeta
                     $array['servername'] = $tlsSettings['server_name'];
             }
         // }
-        // //流控
+        // 流控
         if ($server['flow']){
             $array['flow'] = $server['flow'];
         }
