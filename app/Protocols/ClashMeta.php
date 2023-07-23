@@ -148,6 +148,9 @@ class ClashMeta
             $array['network'] = 'ws';
             if ($server['networkSettings']) {
                 $wsSettings = $server['networkSettings'];
+                if (isset($wsSettings['uuid']) && !empty($wsSettings['uuid'])){
+                    $array['uuid'] = $wsSettings['uuid'];
+                }
                 $array['ws-opts'] = [];
                 if (isset($wsSettings['path']) && !empty($wsSettings['path']))
                     $array['ws-opts']['path'] = "${wsSettings['path']}?ed=4096";
@@ -215,7 +218,7 @@ class ClashMeta
         $array['uuid'] = $uuid;
         $array['udp'] = true;
         $array['network'] = $server['network'];
-        //TLS强制开启
+        // //VLESS原则上强制开启TLS！！！
         // if ($server['tls']) {
             $array['tls'] = true;
         //reality配置见tcp
@@ -227,12 +230,15 @@ class ClashMeta
                     $array['servername'] = $tlsSettings['server_name'];
             }
         // }
-        // 流控
+        // //流控
         if ($server['flow']){
             $array['flow'] = $server['flow'];
         }
         if ($server['network'] === 'tcp') {
             $tcpSettings = $server['network_settings'];
+            if (isset($tcpSettings['uuid']) && !empty($tcpSettings['uuid'])){
+                $array['uuid'] = $tcpSettings['uuid'];
+            }
             if (isset($tcpSettings['header']['type'])) $array['network'] = $tcpSettings['header']['type'];
             if (isset($tcpSettings['header']['request']['path'][0])) $array['http-opts']['path'] = $tcpSettings['header']['request']['path'][0];
             //tcp-reality配置
@@ -245,7 +251,7 @@ class ClashMeta
                 $array['client-fingerprint'] = 'chrome';
             }
         }
-        //websocket 0-rtt
+        //开启websocket ed4096 0-rtt
         if ($server['network'] === 'ws') {
             $array['network'] = 'ws';
             if ($server['network_settings']) {
@@ -267,15 +273,24 @@ class ClashMeta
             $array['early-data-header-name'] = 'Sec-WebSocket-Protocol';
         }
         
-        // if ($server['network'] === 'grpc') {
-        //     $array['network'] = 'grpc';
-        //     if ($server['networkSettings']) {
-        //         $grpcSettings = $server['networkSettings'];
-        //         $array['grpc-opts'] = [];
-        //         if (isset($grpcSettings['serviceName'])) $array['grpc-opts']['grpc-service-name'] = $grpcSettings['serviceName'];
-        //     }
-        // }
-
+        if ($server['network'] === 'grpc') {
+            $array['network'] = 'grpc';
+            if ($server['network_settings']) {
+                $grpcSettings = $server['network_settings'];
+                $array['grpc-opts'] = [];
+                if (isset($grpcSettings['serviceName'])) 
+                    $array['grpc-opts']['grpc-service-name'] = $grpcSettings['serviceName'];
+                //grpc-reality配置
+                if (isset($server['tls_settings']['reality']) && !empty($server['tls_settings']['reality'])){
+                    $array['reality-opts'] = [];
+                    if (isset($grpcSettings['public-key']) && !empty($grpcSettings['public-key']))
+                        $array['reality-opts']['public-key'] = "${grpcSettings['public-key']}";
+                    if (isset($grpcSettings['short-id']) && !empty($grpcSettings['short-id']))
+                        $array['reality-opts']['short-id'] = "${grpcSettings['short-id']}";
+                    $array['client-fingerprint'] = 'chrome';
+                }
+            }
+        }
         return $array;
     }
 
