@@ -16,6 +16,8 @@ class ClientController extends Controller
         $flag = $request->input('flag')
             ?? ($_SERVER['HTTP_USER_AGENT'] ?? '');
         $flag = strtolower($flag);
+        if (strpos($flag, 'clash-verge') === 0) 
+            $flag = 'meta';
         $user = $request->user;
         // account not expired and is not banned.
         $userService = new UserService();
