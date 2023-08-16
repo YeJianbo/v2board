@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\ServerShadowsocks;
 use App\Models\ServerTrojan;
 use App\Models\ServerVmess;
+use App\Models\ServerVless;
 use App\Models\ServerHysteria;
 use App\Models\Stat;
 use App\Models\StatServer;
@@ -101,6 +102,7 @@ class StatController extends Controller
             'v2ray' => ServerVmess::where('parent_id', null)->get()->toArray(),
             'trojan' => ServerTrojan::where('parent_id', null)->get()->toArray(),
             'vmess' => ServerVmess::where('parent_id', null)->get()->toArray(),
+            'vless' => ServerVless::where('parent_id', null)->get()->toArray(),
             'hysteria' => ServerHysteria::where('parent_id', null)->get()->toArray()
         ];
         $startAt = strtotime('-1 day', strtotime(date('Y-m-d')));
