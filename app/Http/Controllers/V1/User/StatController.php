@@ -25,4 +25,31 @@ class StatController extends Controller
             'data' => $builder->get()
         ]);
     }
+
+    public function getNodeTrafficLog(Request $request)
+    {
+        $builder = \App\Models\ServerLog::select([
+            'server_id',
+            'method as node_type',
+            'u',
+            'd',
+            'rate',
+            'log_at as record_at'
+        ])
+            ->where('user_id', $request->user['id'])
+            ->where('log_at', '>=', strtotime('-30 days'))
+            ->orderBy('log_at', 'DESC');
+        
+        $logs = $builder->get();
+
+        // 格式化计费: 消耗额度 = (u + d) * rate
+        $logs->transform(function ($item) {
+            $item->cost = ($item->u + $item->d) * $item->rate;
+            return $item;
+        });
+
+        return response([
+            'data' => $logs
+        ]);
+    }
 }

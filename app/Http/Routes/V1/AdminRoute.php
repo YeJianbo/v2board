@@ -28,6 +28,11 @@ class AdminRoute
             $router->get ('/server/group/fetch', 'V1\\Admin\\Server\\GroupController@fetch');
             $router->post('/server/group/save', 'V1\\Admin\\Server\\GroupController@save');
             $router->post('/server/group/drop', 'V1\\Admin\\Server\\GroupController@drop');
+            // Machine
+            $router->get ('/machine/fetch', 'V1\\Admin\\MachineController@fetch');
+            $router->post('/machine/save', 'V1\\Admin\\MachineController@save');
+            $router->post('/machine/drop', 'V1\\Admin\\MachineController@drop');
+            $router->post('/machine/deployCommand', 'V1\\Admin\\MachineController@deployCommand');
             $router->get ('/server/route/fetch', 'V1\\Admin\\Server\\RouteController@fetch');
             $router->post('/server/route/save', 'V1\\Admin\\Server\\RouteController@save');
             $router->post('/server/route/drop', 'V1\\Admin\\Server\\RouteController@drop');

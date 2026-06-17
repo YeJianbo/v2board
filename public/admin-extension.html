@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>V2Board 增强管理插件</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f3f4f6; }
+        .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; font-weight: bold; }
+    </style>
+</head>
+<body>
+<div id="app" class="max-w-7xl mx-auto p-6">
+    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+        <div class="bg-blue-600 text-white p-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold">V2Board 增强管理面板 (Extension)</h1>
+            <div class="text-sm">安全授权状态: <span v-if="adminToken" class="text-green-300">已连接</span><span v-else class="text-red-300">未授权 (请先在主后台登录)</span></div>
+        </div>
+        
+        <div class="flex border-b">
+            <button @click="currentTab = 'machine'" :class="{'tab-active': currentTab === 'machine'}" class="px-6 py-3 text-gray-600 hover:bg-gray-50 focus:outline-none">📡 机器与探针管理</button>
+            <button @click="currentTab = 'route'" :class="{'tab-active': currentTab === 'route'}" class="px-6 py-3 text-gray-600 hover:bg-gray-50 focus:outline-none">🛣️ 路由可视化配置</button>
+            <button @click="currentTab = 'traffic'" :class="{'tab-active': currentTab === 'traffic'}" class="px-6 py-3 text-gray-600 hover:bg-gray-50 focus:outline-none">📊 精细化流量账单</button>
+        </div>
+
+        <div class="p-6">
+            <!-- 机器探针管理 -->
+            <div v-show="currentTab === 'machine'">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-gray-800">物理机与自动部署</h2>
+                    <button @click="addMachine" class="bg-blue-500 text-white px-4 py-2 rounded shadow hover:bg-blue-600">+ 添加物理机</button>
+                </div>
+                
+                <table class="min-w-full bg-white border">
+                    <thead class="bg-gray-100 border-b">
+                        <tr>
+                            <th class="py-2 px-4 text-left">ID</th>
+                            <th class="py-2 px-4 text-left">机器名称</th>
+                            <th class="py-2 px-4 text-left">IP白名单(Host)</th>
+                            <th class="py-2 px-4 text-left">Agent Token</th>
+                            <th class="py-2 px-4 text-left">实时状态</th>
+                            <th class="py-2 px-4 text-left">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="m in machines" :key="m.id" class="border-b hover:bg-gray-50">
+                            <td class="py-2 px-4">{{ m.id }}</td>
+                            <td class="py-2 px-4 font-semibold">{{ m.name }}</td>
+                            <td class="py-2 px-4 text-sm">{{ m.host || '不限制(不安全)' }}</td>
+                            <td class="py-2 px-4 text-xs text-gray-500 font-mono">{{ m.api_token }}</td>
+                            <td class="py-2 px-4 text-sm">
+                                <span v-if="m.status" class="text-green-600">在线 (CPU: {{ parseStatus(m.status).cpu }}%)</span>
+                                <span v-else class="text-red-500">离线</span>
+                            </td>
+                            <td class="py-2 px-4">
+                                <button @click="deployNode(m.id)" class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600">一键拉起节点</button>
+                                <button @click="deleteMachine(m.id)" class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600 ml-2">删除</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 可视化路由管理 -->
+            <div v-show="currentTab === 'route'">
+                <h2 class="text-lg font-bold text-gray-800 mb-4">生成高级路由规则</h2>
+                <div class="grid grid-cols-2 gap-6">
+                    <div class="border p-4 rounded bg-gray-50">
+                        <label class="block text-sm font-medium mb-1">优先级设置</label>
+                        <select v-model="routeForm.action" class="w-full p-2 border rounded mb-4">
+                            <option value="ipv4_first">IPv4 优先</option>
+                            <option value="ipv6_first">IPv6 优先</option>
+                            <option value="block_domain">屏蔽特定网站 (域名)</option>
+                            <option value="specific_nic">指定出站网卡 (特定IP)</option>
+                        </select>
+                        
+                        <label class="block text-sm font-medium mb-1">匹配目标 (多项请回车换行)</label>
+                        <textarea v-model="routeForm.match" class="w-full p-2 border rounded h-24 mb-4" placeholder="例如: geosite:cn 或 example.com"></textarea>
+                        
+                        <button @click="saveRoute" class="bg-blue-600 text-white px-4 py-2 rounded shadow w-full">快速保存至系统</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 流量账单 -->
+            <div v-show="currentTab === 'traffic'">
+                <h2 class="text-lg font-bold text-gray-800 mb-4">全节点精细化流量查询 (测试功能)</h2>
+                <p class="text-sm text-gray-500 mb-4">此功能需在 User API 侧调用，当前环境为 Admin 凭证，需配合 Admin API 查询。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+new Vue({
+    el: '#app',
+    data: {
+        currentTab: 'machine',
+        adminToken: '',
+        machines: [],
+        routeForm: {
+            action: 'ipv4_first',
+            match: ''
+        }
+    },
+    mounted() {
+        // Retrieve authorization token from localStorage (typical in V2board admin)
+        const authData = localStorage.getItem('admin_auth_data');
+        if (authData) {
+            try {
+                this.adminToken = JSON.parse(authData).auth_data;
+                axios.defaults.headers.common['authorization'] = this.adminToken;
+                this.fetchMachines();
+            } catch (e) {}
+        } else {
+            // Check auth_data just in case
+            this.adminToken = localStorage.getItem('auth_data');
+            if (this.adminToken) {
+                axios.defaults.headers.common['authorization'] = this.adminToken;
+                this.fetchMachines();
+            }
+        }
+    },
+    methods: {
+        parseStatus(jsonStr) {
+            try { return JSON.parse(jsonStr); } catch (e) { return {}; }
+        },
+        async fetchMachines() {
+            try {
+                const res = await axios.get('/api/v1/admin/machine/fetch');
+                this.machines = res.data.data;
+            } catch (e) {
+                console.error('Fetch machines failed', e);
+            }
+        },
+        async addMachine() {
+            const name = prompt('请输入物理机名称:');
+            const host = prompt('请输入探针的白名单IP (必填，以保障安全):');
+            if (!name || !host) return alert('名称和白名单IP不能为空！');
+            try {
+                await axios.post('/api/v1/admin/machine/save', { name, host });
+                this.fetchMachines();
+            } catch (e) {
+                alert('添加失败');
+            }
+        },
+        async deployNode(id) {
+            const nodeId = prompt('请输入要绑定的 V2board Node ID:');
+            if (!nodeId) return;
+            try {
+                const res = await axios.post('/api/v1/admin/machine/deployCommand', {
+                    id: id,
+                    node_id: nodeId,
+                    node_type: 'v2ray'
+                });
+                alert('部署指令已下发至队列，探针将在下一次心跳时执行拉起操作！\n' + res.data.message);
+            } catch (e) {
+                alert('部署请求失败');
+            }
+        },
+        async deleteMachine(id) {
+            if (!confirm('确定删除该机器及探针授权吗？')) return;
+            await axios.post('/api/v1/admin/machine/drop', { id });
+            this.fetchMachines();
+        },
+        async saveRoute() {
+            const matches = this.routeForm.match.split('\n').map(s => s.trim()).filter(s => s);
+            try {
+                await axios.post('/api/v1/admin/server/route/save', {
+                    remarks: '可视化面板自动生成',
+                    action: this.routeForm.action,
+                    match: matches
+                });
+                alert('路由规则保存成功！请在主面板分配给节点。');
+            } catch (e) {
+                alert('路由保存失败，可能需要检查接口兼容性');
+            }
+        }
+    }
+});
+</script>
+</body>
+</html>

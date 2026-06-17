@@ -22,8 +22,9 @@ class ServerService
     public function getAvailableVless(User $user): array
     {
         $servers = [];
-        $model = ServerVless::orderBy('sort', 'ASC');
-        $server = $model->get();
+        $server = Cache::remember('servers_vless', 60, function() {
+            return ServerVless::orderBy('sort', 'ASC')->get();
+        });
         foreach ($server as $key => $v) {
             if (!$v['show']) continue;
             $server[$key]['type'] = 'vless';
@@ -59,8 +60,9 @@ class ServerService
     public function getAvailableVmess(User $user): array
     {
         $servers = [];
-        $model = ServerVmess::orderBy('sort', 'ASC');
-        $vmess = $model->get();
+        $vmess = Cache::remember('servers_vmess', 60, function() {
+            return ServerVmess::orderBy('sort', 'ASC')->get();
+        });
         foreach ($vmess as $key => $v) {
             if (!$v['show']) continue;
             $vmess[$key]['type'] = 'vmess';
@@ -83,8 +85,9 @@ class ServerService
     public function getAvailableTrojan(User $user): array
     {
         $servers = [];
-        $model = ServerTrojan::orderBy('sort', 'ASC');
-        $trojan = $model->get();
+        $trojan = Cache::remember('servers_trojan', 60, function() {
+            return ServerTrojan::orderBy('sort', 'ASC')->get();
+        });
         foreach ($trojan as $key => $v) {
             if (!$v['show']) continue;
             $trojan[$key]['type'] = 'trojan';
@@ -105,8 +108,9 @@ class ServerService
     public function getAvailableTuic(User $user)
     {
         $availableServers = [];
-        $model = ServerTuic::orderBy('sort', 'ASC');
-        $servers = $model->get()->keyBy('id');
+        $servers = Cache::remember('servers_tuic', 60, function() {
+            return ServerTuic::orderBy('sort', 'ASC')->get()->keyBy('id');
+        });
         foreach ($servers as $key => $v) {
             if (!$v['show']) continue;
             $servers[$key]['type'] = 'tuic';
@@ -124,8 +128,9 @@ class ServerService
     public function getAvailableHysteria(User $user)
     {
         $availableServers = [];
-        $model = ServerHysteria::orderBy('sort', 'ASC');
-        $servers = $model->get()->keyBy('id');
+        $servers = Cache::remember('servers_hysteria', 60, function() {
+            return ServerHysteria::orderBy('sort', 'ASC')->get()->keyBy('id');
+        });
         foreach ($servers as $key => $v) {
             if (!$v['show']) continue;
             $servers[$key]['type'] = 'hysteria';
@@ -144,8 +149,9 @@ class ServerService
     public function getAvailableShadowsocks(User $user)
     {
         $servers = [];
-        $model = ServerShadowsocks::orderBy('sort', 'ASC');
-        $shadowsocks = $model->get()->keyBy('id');
+        $shadowsocks = Cache::remember('servers_shadowsocks', 60, function() {
+            return ServerShadowsocks::orderBy('sort', 'ASC')->get()->keyBy('id');
+        });
         foreach ($shadowsocks as $key => $v) {
             if (!$v['show']) continue;
             $shadowsocks[$key]['type'] = 'shadowsocks';
@@ -171,8 +177,9 @@ class ServerService
     public function getAvailableAnyTLS(User $user)
     {
         $servers = [];
-        $model = ServerAnytls::orderBy('sort', 'ASC');
-        $anytls = $model->get()->keyBy('id');
+        $anytls = Cache::remember('servers_anytls', 60, function() {
+            return ServerAnytls::orderBy('sort', 'ASC')->get()->keyBy('id');
+        });
         foreach ($anytls as $key => $v) {
             if (!$v['show']) continue;
             $anytls[$key]['type'] = 'anytls';
@@ -193,8 +200,9 @@ class ServerService
     public function getAvailableV2node(User $user)
     {
         $servers = [];
-        $model = ServerV2node::orderBy('sort', 'ASC');
-        $v2node = $model->get()->keyBy('id');
+        $v2node = Cache::remember('servers_v2node', 60, function() {
+            return ServerV2node::orderBy('sort', 'ASC')->get()->keyBy('id');
+        });
         foreach ($v2node as $key => $v) {
             if (!$v['show']) continue;
             $v2node[$key]['type'] = 'v2node';
