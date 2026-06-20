@@ -14,6 +14,7 @@ use App\Models\ServerV2node;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class MachineController extends Controller
 {
@@ -209,6 +210,54 @@ class MachineController extends Controller
 
         return response()->json([
             'data' => 'success'
+        ]);
+    }
+
+    public function enroll(Request $request)
+    {
+        $params = $request->validate([
+            'enroll_token' => 'required|string',
+            'name' => 'nullable|string|max:100',
+            'host' => 'nullable|string|max:255',
+            'machine_id' => 'nullable|integer|exists:v2_machine,id',
+        ]);
+
+        $cacheKey = 'v2node_probe_enroll:' . hash('sha256', (string) $params['enroll_token']);
+        if (!Cache::has($cacheKey)) {
+            abort(401, 'Unauthorized: Invalid enrollment token');
+        }
+
+        $host = trim((string) ($params['host'] ?? ''));
+        if ($host === '') {
+            $host = $request->ip();
+        }
+
+        if (!empty($params['machine_id'])) {
+            $machine = Machine::findOrFail((int) $params['machine_id']);
+            if (empty($machine->api_token)) {
+                $machine->api_token = Str::random(32);
+                $machine->save();
+            }
+        } else {
+            $name = trim((string) ($params['name'] ?? ''));
+            if ($name === '') {
+                $name = 'Probe ' . $host;
+            }
+
+            $machine = Machine::create([
+                'name' => $name,
+                'host' => $host,
+                'api_token' => Str::random(32),
+            ]);
+        }
+
+        return response()->json([
+            'data' => [
+                'machine_id' => (int) $machine->id,
+                'api_token' => (string) $machine->api_token,
+                'name' => (string) $machine->name,
+                'host' => (string) $machine->host,
+            ],
         ]);
     }
 

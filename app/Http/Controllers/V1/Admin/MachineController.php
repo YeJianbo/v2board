@@ -12,6 +12,8 @@ use Illuminate\Support\Str;
 
 class MachineController extends Controller
 {
+    private const INSTALL_TOKEN_TTL_SECONDS = 604800;
+
     public function fetch(Request $request)
     {
         $onlineWindowSeconds = 180;
@@ -71,6 +73,20 @@ class MachineController extends Controller
         $machine->delete();
         return response([
             'data' => true
+        ]);
+    }
+
+    public function installToken(Request $request)
+    {
+        $token = Str::random(48);
+        Cache::put('v2node_probe_enroll:' . hash('sha256', $token), true, self::INSTALL_TOKEN_TTL_SECONDS);
+
+        return response([
+            'data' => [
+                'token' => $token,
+                'expires_in' => self::INSTALL_TOKEN_TTL_SECONDS,
+                'expires_at' => time() + self::INSTALL_TOKEN_TTL_SECONDS,
+            ],
         ]);
     }
 
