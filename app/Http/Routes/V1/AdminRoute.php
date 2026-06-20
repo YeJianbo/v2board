@@ -8,7 +8,7 @@ class AdminRoute
     public function map(Registrar $router)
     {
         $router->group([
-            'prefix' => config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))),
+            'prefix' => 'admin',
             'middleware' => ['admin', 'log'],
         ], function ($router) {
             // Config
@@ -32,7 +32,9 @@ class AdminRoute
             $router->get ('/machine/fetch', 'V1\\Admin\\MachineController@fetch');
             $router->post('/machine/save', 'V1\\Admin\\MachineController@save');
             $router->post('/machine/drop', 'V1\\Admin\\MachineController@drop');
+            $router->post('/machine/createV2node', 'V1\\Admin\\MachineController@createV2node');
             $router->post('/machine/deployCommand', 'V1\\Admin\\MachineController@deployCommand');
+            $router->post('/machine/restartV2node', 'V1\\Admin\\MachineController@restartV2node');
             $router->get ('/server/route/fetch', 'V1\\Admin\\Server\\RouteController@fetch');
             $router->post('/server/route/save', 'V1\\Admin\\Server\\RouteController@save');
             $router->post('/server/route/drop', 'V1\\Admin\\Server\\RouteController@drop');

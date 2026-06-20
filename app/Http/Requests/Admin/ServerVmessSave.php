@@ -15,6 +15,7 @@ class ServerVmessSave extends FormRequest
     {
         return [
             'show' => '',
+            'machine_id' => 'nullable|integer',
             'name' => 'required',
             'group_id' => 'required|array',
             'route_id' => 'nullable|array',

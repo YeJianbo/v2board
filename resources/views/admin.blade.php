@@ -1,36 +1,80 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
-    <link rel="stylesheet" href="/assets/admin/components.chunk.css?v={{$version}}">
-    <link rel="stylesheet" href="/assets/admin/umi.css?v={{$version}}">
-    <link rel="stylesheet" href="/assets/admin/custom.css?v={{$version}}">
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no">
-    <title>{{$title}}</title>
-    <!-- <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Nunito+Sans:300,400,400i,600,700"> -->
-    <script>window.routerBase = "/";</script>
-    <script>
-        window.settings = {
-            title: '{{$title}}',
-            theme: {
-                sidebar: '{{$theme_sidebar}}',
-                header: '{{$theme_header}}',
-                color: '{{$theme_color}}',
-            },
-            version: '{{$version}}',
-            background_url: '{{$background_url}}',
-            logo: '{{$logo}}',
-            secure_path: '{{$secure_path}}'
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ $title }}</title>
+  <script>
+    window.settings = {
+      base_url: "/",
+      title: "{{ $title }}",
+      version: "{{ $version }}",
+      logo: "{{ $logo }}",
+      secure_path: "{{ $secure_path }}",
+    };
+  </script>
+  @php
+    $manifestPath = public_path('assets/admin/manifest.json');
+    $manifest = file_exists($manifestPath) ? json_decode(file_get_contents($manifestPath), true) : null;
+    $entry = is_array($manifest) ? ($manifest['index.html'] ?? null) : null;
+    $scripts = [];
+    $styles = [];
+    $locales = [];
+
+    if (is_array($entry)) {
+      $visited = [];
+      $collectAssets = function ($chunkName) use (&$collectAssets, &$manifest, &$visited, &$scripts, &$styles) {
+        if (isset($visited[$chunkName]) || !isset($manifest[$chunkName]) || !is_array($manifest[$chunkName])) {
+          return;
         }
-    </script>
+
+        $visited[$chunkName] = true;
+        $chunk = $manifest[$chunkName];
+
+        if (!empty($chunk['css']) && is_array($chunk['css'])) {
+          foreach ($chunk['css'] as $cssFile) {
+            $styles[$cssFile] = $cssFile;
+          }
+        }
+
+        if (!empty($chunk['imports']) && is_array($chunk['imports'])) {
+          foreach ($chunk['imports'] as $import) {
+            $collectAssets($import);
+          }
+        }
+
+        if (!empty($chunk['isEntry']) && !empty($chunk['file'])) {
+          $scripts[$chunk['file']] = $chunk['file'];
+        }
+      };
+
+      $collectAssets('index.html');
+    }
+
+    foreach (glob(public_path('assets/admin/locales/*.js')) ?: [] as $localeFile) {
+      $locales[] = 'locales/' . basename($localeFile);
+    }
+    sort($locales);
+  @endphp
+
+  @if($entry && count($scripts) > 0)
+    @foreach($styles as $css)
+      <link rel="stylesheet" crossorigin href="/assets/admin/{{ $css }}" />
+    @endforeach
+    @foreach($locales as $locale)
+      <script src="/assets/admin/{{ $locale }}"></script>
+    @endforeach
+    @foreach($scripts as $js)
+      <script type="module" crossorigin src="/assets/admin/{{ $js }}"></script>
+    @endforeach
+  @else
+    {{-- Fallback: hardcoded paths --}}
+    <script type="module" crossorigin src="/assets/admin/assets/index.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/admin/assets/index.css" />
+    <link rel="stylesheet" crossorigin href="/assets/admin/assets/vendor.css">
+  @endif
 </head>
-
 <body>
-<div id="root"></div>
-<script src="/assets/admin/vendors.async.js?v={{$version}}"></script>
-<script src="/assets/admin/components.async.js?v={{$version}}"></script>
-<script src="/assets/admin/umi.js?v={{$version}}"></script>
+  <div id="root"></div>
 </body>
-
 </html>

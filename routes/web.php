@@ -37,9 +37,9 @@ Route::get('/', function (Request $request) {
     return view('theme::' . config('v2board.frontend_theme', 'default') . '.dashboard', $renderParams);
 });
 
-//TODO:: 兼容
-Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))), function () {
-    return view('admin', [
+// 后台管理端为前端 SPA，除了 secure_path 根路径外，还需要兜底其子路由。
+$adminViewData = function () {
+    return [
         'title' => config('v2board.app_name', 'V2Board'),
         'theme_sidebar' => config('v2board.frontend_theme_sidebar', 'light'),
         'theme_header' => config('v2board.frontend_theme_header', 'dark'),
@@ -48,8 +48,16 @@ Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_pa
         'version' => config('app.version'),
         'logo' => config('v2board.logo'),
         'secure_path' => config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key'))))
-    ]);
+    ];
+};
+
+Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))), function () use ($adminViewData) {
+    return view('admin', $adminViewData());
 });
+
+Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))) . '/{any}', function () use ($adminViewData) {
+    return view('admin', $adminViewData());
+})->where('any', '.*');
 
 if (!empty(config('v2board.subscribe_path'))) {
     Route::get(config('v2board.subscribe_path'), 'V1\\Client\\ClientController@subscribe')->middleware('client');

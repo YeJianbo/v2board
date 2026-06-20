@@ -9,6 +9,7 @@ use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use MessagePack\Packer;
 
 class UniProxyController extends Controller
@@ -18,13 +19,28 @@ class UniProxyController extends Controller
     private $nodeId;
     private $serverService;
 
+    private function panelSetting(string $key, $default = null)
+    {
+        $configValue = config('v2board.' . $key);
+        if ($configValue !== null && $configValue !== '') {
+            return $configValue;
+        }
+
+        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        if ($dbValue !== null && $dbValue !== '') {
+            return $dbValue;
+        }
+
+        return $default;
+    }
+
     public function __construct(Request $request)
     {
         $token = $request->input('token');
         if (empty($token)) {
             abort(500, 'token is null');
         }
-        if ($token !== config('v2board.server_token')) {
+        if ($token !== $this->panelSetting('server_token', '')) {
             abort(500, 'token is error');
         }
         $this->nodeType = $request->input('node_type');

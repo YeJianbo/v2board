@@ -16,9 +16,25 @@ use App\Models\ServerAnytls;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class ServerService
 {
+    private function panelSetting(string $key, $default = null)
+    {
+        $configValue = config('v2board.' . $key);
+        if ($configValue !== null && $configValue !== '') {
+            return $configValue;
+        }
+
+        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        if ($dbValue !== null && $dbValue !== '') {
+            return $dbValue;
+        }
+
+        return $default;
+    }
+
     public function getAvailableVless(User $user): array
     {
         $servers = [];
@@ -397,17 +413,27 @@ class ServerService
                 $servers[$k]['padding_scheme'] = json_encode($v['padding_scheme']);
             }
 
-            $apiHost = config('v2board.server_api_url', config('v2board.app_url'));
-            $apiKey = config('v2board.server_token', '');
+            $apiHost = $this->panelSetting('server_api_url')
+                ?: $this->panelSetting('app_url')
+                ?: config('app.url');
+            $apiKey = $this->panelSetting('server_token', '');
             $nodeId = (int) $v['id'];
-            $apiHostArg = escapeshellarg((string) $apiHost);
-            $apiKeyArg = escapeshellarg((string) $apiKey);
-            $servers[$k]['install_command'] = sprintf(
-                'wget -N https://raw.githubusercontent.com/wyx2685/v2node/master/script/install.sh && bash install.sh --api-host %s --node-id %d --api-key %s',
-                $apiHostArg,
-                $nodeId,
-                $apiKeyArg
-            );
+            $apiHost = rtrim((string) $apiHost, '/');
+            $apiKey = (string) $apiKey;
+
+            if ($apiHost !== '' && $apiKey !== '') {
+                $apiHostArg = escapeshellarg($apiHost);
+                $apiKeyArg = escapeshellarg($apiKey);
+                $servers[$k]['install_command'] = sprintf(
+                    'wget -N https://raw.githubusercontent.com/YeJianbo/v2node/main/script/install.sh && bash install.sh --api-host %s --node-id %d --api-key %s',
+                    $apiHostArg,
+                    $nodeId,
+                    $apiKeyArg
+                );
+            } else {
+                $servers[$k]['install_command'] = '';
+                $servers[$k]['install_command_missing_reason'] = '请先在系统设置中配置站点 URL 和通讯密钥';
+            }
         }
         return $servers;
     }

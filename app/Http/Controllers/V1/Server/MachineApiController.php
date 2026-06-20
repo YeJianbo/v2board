@@ -11,30 +11,7 @@ class MachineApiController extends Controller
     // High security: strictly check token
     protected function authenticate(Request $request)
     {
-        $token = $request->input('token');
-        if (!$token) {
-            abort(401, 'Unauthorized: No token provided');
-        }
-        $machine = Machine::where('api_token', $token)->first();
-        if (!$machine) {
-            abort(401, 'Unauthorized: Invalid token');
-        }
-
-        // IP Whitelist Check (Security Enhancement)
-        $clientIp = $request->ip();
-        // Allow if machine->host is empty (not restricted) or if it matches the client IP.
-        // For strict security, we force it to match. We can split by comma if multiple IPs are allowed.
-        if (!empty($machine->host)) {
-            $allowedIps = array_map('trim', explode(',', $machine->host));
-            if (!in_array($clientIp, $allowedIps)) {
-                abort(401, "Unauthorized: IP {$clientIp} is not in whitelist");
-            }
-        } else {
-            // Optional: If no host is set, we could reject. But for flexibility, we allow it.
-            // We can log this event.
-        }
-
-        return $machine;
+        abort(404);
     }
 
     public function pushStatus(Request $request)

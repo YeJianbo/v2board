@@ -14,4 +14,14 @@ class Order extends Model
         'updated_at' => 'timestamp',
         'surplus_order_ids' => 'array'
     ];
+
+    public function plan()
+    {
+        return $this->belongsTo(Plan::class);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }

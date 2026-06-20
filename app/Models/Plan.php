@@ -13,4 +13,9 @@ class Plan extends Model
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp'
     ];
+
+    public function users()
+    {
+        return $this->hasMany(User::class);
+    }
 }

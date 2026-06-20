@@ -7,60 +7,52 @@ use Illuminate\Foundation\Http\FormRequest;
 class ConfigSave extends FormRequest
 {
     const RULES = [
-        // deposit
-        'deposit_bounus' => [
-            'nullable',
-            'array',
-        ],
         // invite & commission
-        'ticket_status' => 'in:0,1,2',
-        'invite_force' => 'in:0,1',
-        'invite_commission' => 'integer',
-        'invite_gen_limit' => 'integer',
-        'invite_never_expire' => 'in:0,1',
-        'commission_first_time_enable' => 'in:0,1',
-        'commission_auto_check_enable' => 'in:0,1',
+        'invite_force' => '',
+        'invite_commission' => 'integer|nullable',
+        'invite_gen_limit' => 'integer|nullable',
+        'invite_never_expire' => '',
+        'commission_first_time_enable' => '',
+        'commission_auto_check_enable' => '',
         'commission_withdraw_limit' => 'nullable|numeric',
         'commission_withdraw_method' => 'nullable|array',
-        'withdraw_close_enable' => 'in:0,1',
-        'commission_distribution_enable' => 'in:0,1',
+        'withdraw_close_enable' => '',
+        'commission_distribution_enable' => '',
         'commission_distribution_l1' => 'nullable|numeric',
         'commission_distribution_l2' => 'nullable|numeric',
         'commission_distribution_l3' => 'nullable|numeric',
         // site
         'logo' => 'nullable|url',
-        'force_https' => 'in:0,1',
-        'stop_register' => 'in:0,1',
+        'force_https' => '',
+        'stop_register' => '',
         'app_name' => '',
         'app_description' => '',
         'app_url' => 'nullable|url',
         'subscribe_url' => 'nullable',
-        'subscribe_path' => 'nullable|regex:/^\\//',
-        'try_out_enable' => 'in:0,1',
+        'try_out_enable' => '',
         'try_out_plan_id' => 'integer',
         'try_out_hour' => 'numeric',
         'tos_url' => 'nullable|url',
         'currency' => '',
         'currency_symbol' => '',
+        'ticket_must_wait_reply' => '',
         // subscribe
-        'plan_change_enable' => 'in:0,1',
+        'plan_change_enable' => '',
         'reset_traffic_method' => 'in:0,1,2,3,4',
-        'surplus_enable' => 'in:0,1',
-        'allow_new_period' => 'in:0,1',
-        'new_order_event_id' => 'in:0,1',
-        'renew_order_event_id' => 'in:0,1',
-        'change_order_event_id' => 'in:0,1',
-        'show_info_to_server_enable' => 'in:0,1',
-        'show_subscribe_method' => 'in:0,1,2',
-        'show_subscribe_expire' => 'nullable|integer',
+        'surplus_enable' => '',
+        'new_order_event_id' => '',
+        'renew_order_event_id' => '',
+        'change_order_event_id' => '',
+        'show_info_to_server_enable' => '',
+        'show_protocol_to_server_enable' => '',
+        'subscribe_path' => '',
         // server
-        'server_api_url' => 'nullable|string',
         'server_token' => 'nullable|min:16',
         'server_pull_interval' => 'integer',
         'server_push_interval' => 'integer',
-        'device_limit_mode' => 'in:0,1',
-        'server_node_report_min_traffic' => 'integer', 
-        'server_device_online_min_traffic' => 'integer', 
+        'device_limit_mode' => 'integer',
+        'server_ws_enable' => 'boolean',
+        'server_ws_url' => 'nullable|url',
         // frontend
         'frontend_theme' => '',
         'frontend_theme_sidebar' => 'nullable|in:dark,light',
@@ -68,16 +60,17 @@ class ConfigSave extends FormRequest
         'frontend_theme_color' => 'nullable|in:default,darkblue,black,green',
         'frontend_background_url' => 'nullable|url',
         // email
-        'email_template' => '',
         'email_host' => '',
         'email_port' => '',
         'email_username' => '',
         'email_password' => '',
         'email_encryption' => '',
         'email_from_address' => '',
+        'remind_mail_enable' => '',
         // telegram
-        'telegram_bot_enable' => 'in:0,1',
+        'telegram_bot_enable' => '',
         'telegram_bot_token' => '',
+        'telegram_webhook_url' => 'nullable|url',
         'telegram_discuss_id' => '',
         'telegram_channel_id' => '',
         'telegram_discuss_link' => 'nullable|url',
@@ -89,21 +82,36 @@ class ConfigSave extends FormRequest
         'android_version' => '',
         'android_download_url' => '',
         // safe
-        'email_whitelist_enable' => 'in:0,1',
+        'email_whitelist_enable' => 'boolean',
         'email_whitelist_suffix' => 'nullable|array',
-        'email_gmail_limit_enable' => 'in:0,1',
-        'recaptcha_enable' => 'in:0,1',
+        'email_gmail_limit_enable' => 'boolean',
+        'captcha_enable' => 'boolean',
+        'captcha_type' => 'in:recaptcha,turnstile,recaptcha-v3',
+        'recaptcha_enable' => 'boolean',
         'recaptcha_key' => '',
         'recaptcha_site_key' => '',
-        'email_verify' => 'in:0,1',
-        'safe_mode_enable' => 'in:0,1',
-        'register_limit_by_ip_enable' => 'in:0,1',
+        'recaptcha_v3_secret_key' => '',
+        'recaptcha_v3_site_key' => '',
+        'recaptcha_v3_score_threshold' => 'numeric|min:0|max:1',
+        'turnstile_secret_key' => '',
+        'turnstile_site_key' => '',
+        'email_verify' => 'bool',
+        'safe_mode_enable' => 'boolean',
+        'register_limit_by_ip_enable' => 'boolean',
         'register_limit_count' => 'integer',
         'register_limit_expire' => 'integer',
         'secure_path' => 'min:8|regex:/^[\w-]*$/',
-        'password_limit_enable' => 'in:0,1',
+        'password_limit_enable' => 'boolean',
         'password_limit_count' => 'integer',
         'password_limit_expire' => 'integer',
+        'default_remind_expire' => 'boolean',
+        'default_remind_traffic' => 'boolean',
+        'subscribe_template_singbox' => 'nullable',
+        'subscribe_template_clash' => 'nullable',
+        'subscribe_template_clashmeta' => 'nullable',
+        'subscribe_template_stash' => 'nullable',
+        'subscribe_template_surge' => 'nullable',
+        'subscribe_template_surfboard' => 'nullable'
     ];
     /**
      * Get the validation rules that apply to the request.
@@ -112,19 +120,7 @@ class ConfigSave extends FormRequest
      */
     public function rules()
     {
-        $rules = self::RULES;
-
-        $rules['deposit_bounus'][] = function ($attribute, $value, $fail) {
-            foreach ($value as $tier) {
-                if (!preg_match('/^\d+(\.\d+)?:\d+(\.\d+)?$/', $tier)) {
-                    if($tier == '') {
-                        continue;
-                    }
-                    $fail('充值奖励格式不正确，必须为充值金额:奖励金额');
-                }
-            }
-        };
-        return $rules;
+        return self::RULES;
     }
 
     public function messages()
@@ -133,13 +129,17 @@ class ConfigSave extends FormRequest
         return [
             'app_url.url' => '站点URL格式不正确，必须携带http(s)://',
             'subscribe_url.url' => '订阅URL格式不正确，必须携带http(s)://',
-            'subscribe_path.regex' => '订阅路径必须以/开头',
             'server_token.min' => '通讯密钥长度必须大于16位',
             'tos_url.url' => '服务条款URL格式不正确，必须携带http(s)://',
+            'telegram_webhook_url.url' => 'Telegram Webhook地址格式不正确，必须携带http(s)://',
             'telegram_discuss_link.url' => 'Telegram群组地址必须为URL格式，必须携带http(s)://',
             'logo.url' => 'LOGO URL格式不正确，必须携带https(s)://',
             'secure_path.min' => '后台路径长度最小为8位',
             'secure_path.regex' => '后台路径只能为字母或数字',
+            'captcha_type.in' => '人机验证类型只能选择 recaptcha、turnstile 或 recaptcha-v3',
+            'recaptcha_v3_score_threshold.numeric' => 'reCAPTCHA v3 分数阈值必须为数字',
+            'recaptcha_v3_score_threshold.min' => 'reCAPTCHA v3 分数阈值不能小于0',
+            'recaptcha_v3_score_threshold.max' => 'reCAPTCHA v3 分数阈值不能大于1'
         ];
     }
 }

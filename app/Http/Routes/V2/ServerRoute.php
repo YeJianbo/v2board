@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Routes\V2;
 
 use Illuminate\Contracts\Routing\Registrar;
@@ -10,9 +11,9 @@ class ServerRoute
         $router->group([
             'prefix' => 'server'
         ], function ($router) {
-            $router->any('/config', function() {
-                $ctrl = \App::make("\\App\\Http\\Controllers\\V2\\Server\\ServerController");
-                return \App::call([$ctrl, 'config']);
+            $router->any('/{action}', function ($action) {
+                $ctrl = \App::make(\App\Http\Controllers\V2\Server\ServerController::class);
+                return \App::call([$ctrl, $action]);
             });
         });
     }

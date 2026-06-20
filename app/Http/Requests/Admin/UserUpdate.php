@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Services\Plugin\HookManager;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UserUpdate extends FormRequest
@@ -13,37 +14,38 @@ class UserUpdate extends FormRequest
      */
     public function rules()
     {
-        return [
-            'email' => 'required|email:strict',
+        $rules = [
+            'id' => 'required|integer',
+            'email' => 'email:strict',
             'password' => 'nullable|min:8',
             'transfer_enable' => 'numeric',
-            'device_limit' => 'nullable|integer',
             'expired_at' => 'nullable|integer',
-            'banned' => 'required|in:0,1',
+            'banned' => 'bool',
             'plan_id' => 'nullable|integer',
             'commission_rate' => 'nullable|integer|min:0|max:100',
             'discount' => 'nullable|integer|min:0|max:100',
-            'is_admin' => 'required|in:0,1',
-            'is_staff' => 'required|in:0,1',
+            'is_admin' => 'boolean',
+            'is_staff' => 'boolean',
             'u' => 'integer',
             'd' => 'integer',
-            'balance' => 'integer',
+            'balance' => 'numeric',
             'commission_type' => 'integer',
-            'commission_balance' => 'integer',
+            'commission_balance' => 'numeric',
             'remarks' => 'nullable',
-            'speed_limit' => 'nullable|integer'
+            'speed_limit' => 'nullable|integer',
+            'device_limit' => 'nullable|integer'
         ];
+
+        return HookManager::filter('admin.user.update.rules', $rules, $this);
     }
 
     public function messages()
     {
-        return [
+        $messages = [
             'email.required' => '邮箱不能为空',
             'email.email' => '邮箱格式不正确',
             'transfer_enable.numeric' => '流量格式不正确',
-            'device_limit.integer' => '设备数限制格式不正确',
             'expired_at.integer' => '到期时间格式不正确',
-            'banned.required' => '是否封禁不能为空',
             'banned.in' => '是否封禁格式不正确',
             'is_admin.required' => '是否管理员不能为空',
             'is_admin.in' => '是否管理员格式不正确',
@@ -63,7 +65,10 @@ class UserUpdate extends FormRequest
             'balance.integer' => '余额格式不正确',
             'commission_balance.integer' => '佣金格式不正确',
             'password.min' => '密码长度最小8位',
-            'speed_limit.integer' => '限速格式不正确'
+            'speed_limit.integer' => '限速格式不正确',
+            'device_limit.integer' => '设备数量格式不正确'
         ];
+
+        return HookManager::filter('admin.user.update.messages', $messages, $this);
     }
 }

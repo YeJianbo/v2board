@@ -6,12 +6,37 @@ use App\Http\Controllers\Controller;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
 use App\Utils\Helper;
+use Illuminate\Support\Facades\DB;
 
 class ServerController extends Controller
 {
     private $nodeInfo;
     private $nodeId;
     private $serverService;
+
+    private function objectOrEmpty($value)
+    {
+        if (empty($value)) {
+            return (object) [];
+        }
+
+        return $value;
+    }
+
+    private function panelSetting(string $key, $default = null)
+    {
+        $configValue = config('v2board.' . $key);
+        if ($configValue !== null && $configValue !== '') {
+            return $configValue;
+        }
+
+        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        if ($dbValue !== null && $dbValue !== '') {
+            return $dbValue;
+        }
+
+        return $default;
+    }
 
     public function __construct(Request $request)
     {
@@ -27,7 +52,7 @@ class ServerController extends Controller
         }
 
         // token 错误
-        if ($token !== config('v2board.server_token')) {
+        if ($token !== $this->panelSetting('server_token', '')) {
             response()->json([
                 'status' => 'fail',
                 'message' => 'token is error'
@@ -56,12 +81,12 @@ class ServerController extends Controller
             'listen_ip' => $this->nodeInfo->listen_ip,
             'server_port' => $this->nodeInfo->server_port,
             'network' => $this->nodeInfo->network,
-            'network_settings' => $this->nodeInfo->network_settings,
+            'network_settings' => $this->objectOrEmpty($this->nodeInfo->network_settings),
             'protocol' => $this->nodeInfo->protocol,
             'tls' => $this->nodeInfo->tls,
-            'tls_settings' => $this->nodeInfo->tls_settings,
+            'tls_settings' => $this->objectOrEmpty($this->nodeInfo->tls_settings),
             'encryption' => $this->nodeInfo->encryption,
-            'encryption_settings' => $this->nodeInfo->encryption_settings,
+            'encryption_settings' => $this->objectOrEmpty($this->nodeInfo->encryption_settings),
             'flow' => $this->nodeInfo->flow,
             'cipher' => $this->nodeInfo->cipher,
             'congestion_control' => $this->nodeInfo->congestion_control,

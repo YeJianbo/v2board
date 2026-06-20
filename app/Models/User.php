@@ -13,4 +13,19 @@ class User extends Model
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp'
     ];
+
+    public function plan()
+    {
+        return $this->belongsTo(Plan::class);
+    }
+
+    public function invite_user()
+    {
+        return $this->belongsTo(User::class, 'invite_user_id');
+    }
+
+    public function group()
+    {
+        return $this->belongsTo(ServerGroup::class, 'group_id');
+    }
 }

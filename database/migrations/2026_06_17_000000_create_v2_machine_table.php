@@ -13,6 +13,10 @@ class CreateV2MachineTable extends Migration
      */
     public function up()
     {
+        if (Schema::hasTable('v2_machine')) {
+            return;
+        }
+
         Schema::create('v2_machine', function (Blueprint $table) {
             $table->id();
             $table->string('name')->comment('机器名称');

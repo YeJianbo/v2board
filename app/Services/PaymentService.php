@@ -4,6 +4,8 @@ namespace App\Services;
 
 
 use App\Models\Payment;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 
 class PaymentService
 {
@@ -11,6 +13,24 @@ class PaymentService
     protected $class;
     protected $config;
     protected $payment;
+
+    public static function getAllPaymentMethodNames(): array
+    {
+        $paymentPath = app_path('Payments');
+        if (!File::isDirectory($paymentPath)) {
+            return [];
+        }
+
+        return collect(File::files($paymentPath))
+            ->filter(function ($file) {
+                return $file->getExtension() === 'php';
+            })
+            ->map(function ($file) {
+                return Str::before($file->getFilename(), '.php');
+            })
+            ->values()
+            ->all();
+    }
 
     public function __construct($method, $id = NULL, $uuid = NULL)
     {

@@ -17,6 +17,7 @@ class V2nodeController extends Controller
             'route_id' => 'nullable|array',
             'name' => 'required',
             'parent_id' => 'nullable|integer',
+            'machine_id' => 'nullable|integer|exists:v2_machine,id',
             'host' => 'required',
             'listen_ip' => 'nullable',
             'port' => 'required',
@@ -209,6 +210,7 @@ class V2nodeController extends Controller
     {
         $params = $request->validate([
             'show' => 'nullable|in:0,1',
+            'machine_id' => 'nullable|integer|exists:v2_machine,id',
         ]);
 
         $server = ServerV2node::find($request->input('id'));
