@@ -4,7 +4,11 @@
 
 ## 本分支支持的后端
  - [修改版V2bX](https://github.com/wyx2685/V2bX)
- - [v2node](https://github.com/wyx2685/v2node)
+ - [v2node](https://github.com/YeJianbo/v2node)
+
+## 定制版部署文档
+
+- [定制版 V2Board + v2node 部署文档](docs/DEPLOYMENT_CUSTOM.md)
 
 ## 原版迁移步骤
 
