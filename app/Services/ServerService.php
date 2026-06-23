@@ -272,7 +272,7 @@ class ServerService
             $lastPushAt = (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_PUSH_AT", $serverId), 0);
             $server['last_check_at'] = $lastCheckAt;
             $server['last_push_at'] = $lastPushAt;
-            $server['is_online'] = (time() - 300) < max($lastCheckAt, $lastPushAt) ? 1 : 0;
+            $server['is_online'] = max($lastCheckAt, $lastPushAt) > 0 ? 1 : 0;
             $server['cache_key'] = "{$server['type']}-{$server['id']}-{$server['updated_at']}-{$server['is_online']}";
             return $server;
         }, $servers);
@@ -457,10 +457,10 @@ class ServerService
             $servers[$k]['last_check_at'] = $lastCheckAt;
             $servers[$k]['last_push_at'] = $lastPushAt;
             $lastActiveAt = max($lastCheckAt, $lastPushAt);
-            $servers[$k]['is_online'] = (time() - 300) < $lastActiveAt ? 1 : 0;
+            $servers[$k]['is_online'] = $lastActiveAt > 0 ? 1 : 0;
             if (!$servers[$k]['is_online']) {
                 $servers[$k]['available_status'] = 0;
-            } else if ((time() - 300) >= $lastPushAt) {
+            } else if (!$lastPushAt) {
                 $servers[$k]['available_status'] = 1;
             } else {
                 $servers[$k]['available_status'] = 2;
