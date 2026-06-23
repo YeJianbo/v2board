@@ -23,6 +23,20 @@ class ServerController extends Controller
         return $value;
     }
 
+    private function normalizeSettingsForV2node($value)
+    {
+        if (empty($value)) {
+            return (object) [];
+        }
+
+        $settings = is_array($value) ? $value : (array) $value;
+        if (array_key_exists('server_port', $settings) && $settings['server_port'] !== null) {
+            $settings['server_port'] = (string) $settings['server_port'];
+        }
+
+        return $settings;
+    }
+
     private function panelSetting(string $key, $default = null)
     {
         $configValue = config('v2board.' . $key);
@@ -84,7 +98,7 @@ class ServerController extends Controller
             'network_settings' => $this->objectOrEmpty($this->nodeInfo->network_settings),
             'protocol' => $this->nodeInfo->protocol,
             'tls' => $this->nodeInfo->tls,
-            'tls_settings' => $this->objectOrEmpty($this->nodeInfo->tls_settings),
+            'tls_settings' => $this->normalizeSettingsForV2node($this->nodeInfo->tls_settings),
             'encryption' => $this->nodeInfo->encryption,
             'encryption_settings' => $this->objectOrEmpty($this->nodeInfo->encryption_settings),
             'flow' => $this->nodeInfo->flow,

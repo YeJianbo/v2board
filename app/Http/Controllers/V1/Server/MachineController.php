@@ -155,6 +155,7 @@ class MachineController extends Controller
 
         // In local environment without a proper app_url, we just default to local
         $apiHost = $this->panelSetting('server_api_url')
+            ?: $request->getSchemeAndHttpHost()
             ?: $this->panelSetting('app_url')
             ?: config('app.url', 'http://127.0.0.1:8000');
         // Force the same host that requested if config is broken
@@ -291,6 +292,7 @@ class MachineController extends Controller
 
         $apiHost = rtrim((string) (
             $this->panelSetting('server_api_url')
+                ?: $request->getSchemeAndHttpHost()
                 ?: $this->panelSetting('app_url')
                 ?: config('app.url', '')
         ), '/');
