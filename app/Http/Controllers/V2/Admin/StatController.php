@@ -10,6 +10,7 @@ use App\Models\Stat;
 use App\Models\StatServer;
 use App\Models\StatUser;
 use App\Models\StatUserServer;
+use App\Models\StatUserServerHour;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Services\StatisticalService;
@@ -352,6 +353,159 @@ class StatController extends Controller
                 'end_at' => (int) $range->end_at,
                 'user_total' => (int) $range->user_total,
                 'note' => null,
+            ],
+        ];
+    }
+
+    public function getNodeUserTraffic(Request $request)
+    {
+        $request->validate([
+            'server_id' => 'required|integer',
+            'server_type' => 'required|string|max:32',
+            'start_time' => 'nullable|integer|min:1000000000|max:9999999999',
+            'end_time' => 'nullable|integer|min:1000000000|max:9999999999',
+            'limit' => 'nullable|integer|min:1|max:100',
+        ]);
+
+        $serverId = (int) $request->input('server_id');
+        $serverType = strtolower((string) $request->input('server_type'));
+        $limit = min(max((int) $request->input('limit', 20), 1), 100);
+        $statsQuery = StatUserServer::where('server_id', $serverId)
+            ->where('server_type', $serverType);
+
+        if ($request->input('start_time')) {
+            $statsQuery->where('record_at', '>=', (int) $request->input('start_time'));
+        }
+        if ($request->input('end_time')) {
+            $statsQuery->where('record_at', '<=', (int) $request->input('end_time'));
+        }
+
+        $range = (clone $statsQuery)
+            ->selectRaw('MIN(record_at) as start_at, MAX(record_at) as end_at, SUM(u + d) as node_total')
+            ->first();
+
+        if (!$range || !$range->start_at || !$range->end_at) {
+            return [
+                'data' => [],
+                'meta' => [
+                    'start_at' => null,
+                    'end_at' => null,
+                    'node_total' => 0,
+                    'note' => '节点用户排行从新版部署后开始统计，历史数据无法拆分到用户。',
+                ],
+            ];
+        }
+
+        $rows = (clone $statsQuery)
+            ->selectRaw('user_id, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
+            ->groupBy('user_id')
+            ->orderBy('total', 'DESC')
+            ->limit($limit)
+            ->get();
+
+        $users = User::whereIn('id', $rows->pluck('user_id')->all())
+            ->get(['id', 'email'])
+            ->keyBy('id');
+
+        $data = $rows->map(function ($row) use ($users) {
+            $user = $users->get($row->user_id);
+            return [
+                'user_id' => (int) $row->user_id,
+                'email' => $user ? $user->email : "User {$row->user_id}",
+                'u' => (int) $row->u,
+                'd' => (int) $row->d,
+                'total' => (int) $row->total,
+            ];
+        })->values();
+
+        return [
+            'data' => $data,
+            'meta' => [
+                'start_at' => (int) $range->start_at,
+                'end_at' => (int) $range->end_at,
+                'node_total' => (int) $range->node_total,
+                'note' => null,
+            ],
+        ];
+    }
+
+    public function getNodeTrafficSeries(Request $request)
+    {
+        $request->validate([
+            'server_id' => 'required|integer',
+            'server_type' => 'required|string|max:32',
+            'granularity' => 'nullable|in:hour,day',
+            'start_time' => 'nullable|integer|min:1000000000|max:9999999999',
+            'end_time' => 'nullable|integer|min:1000000000|max:9999999999',
+        ]);
+
+        $serverId = (int) $request->input('server_id');
+        $serverType = strtolower((string) $request->input('server_type'));
+        $granularity = $request->input('granularity') === 'hour' ? 'hour' : 'day';
+        $endInput = (int) $request->input('end_time', time());
+
+        if ($granularity === 'hour') {
+            $model = StatUserServerHour::query();
+            $step = 3600;
+            $format = 'm-d H:00';
+            $endAt = strtotime(date('Y-m-d H:00:00', $endInput));
+            $startAt = $request->input('start_time')
+                ? strtotime(date('Y-m-d H:00:00', (int) $request->input('start_time')))
+                : $endAt - 23 * $step;
+            $maxRange = 14 * 24 * $step;
+        } else {
+            $model = StatUserServer::query();
+            $step = 86400;
+            $format = 'm-d';
+            $endAt = strtotime(date('Y-m-d', $endInput));
+            $startAt = $request->input('start_time')
+                ? strtotime(date('Y-m-d', (int) $request->input('start_time')))
+                : $endAt - 29 * $step;
+            $maxRange = 366 * $step;
+        }
+
+        if ($startAt > $endAt) {
+            [$startAt, $endAt] = [$endAt, $startAt];
+        }
+        if (($endAt - $startAt) > $maxRange) {
+            $startAt = $endAt - $maxRange;
+        }
+
+        $rows = $model
+            ->where('server_id', $serverId)
+            ->where('server_type', $serverType)
+            ->where('record_at', '>=', $startAt)
+            ->where('record_at', '<=', $endAt)
+            ->selectRaw('record_at, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
+            ->groupBy('record_at')
+            ->orderBy('record_at')
+            ->get()
+            ->keyBy('record_at');
+
+        $points = [];
+        for ($cursor = $startAt; $cursor <= $endAt; $cursor += $step) {
+            $row = $rows->get($cursor);
+            $u = (int) ($row->u ?? 0);
+            $d = (int) ($row->d ?? 0);
+            $points[] = [
+                'timestamp' => $cursor,
+                'label' => date($format, $cursor),
+                'u' => $u,
+                'd' => $d,
+                'total' => $u + $d,
+            ];
+        }
+
+        return [
+            'data' => $points,
+            'meta' => [
+                'granularity' => $granularity,
+                'start_at' => $startAt,
+                'end_at' => $endAt,
+                'total' => array_sum(array_column($points, 'total')),
+                'note' => $granularity === 'hour'
+                    ? '小时曲线从新版部署后开始统计，部署前无法按小时拆分。'
+                    : null,
             ],
         ];
     }

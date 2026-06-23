@@ -32,10 +32,11 @@ class StatUserServerJob implements ShouldQueue
 
     public function handle()
     {
-        $recordAt = strtotime(date('Y-m-d'));
+        $dayRecordAt = strtotime(date('Y-m-d'));
+        $hourRecordAt = strtotime(date('Y-m-d H:00:00'));
         $serverId = (int) ($this->server['id'] ?? 0);
         $serverRate = (string) ($this->server['rate'] ?? '1.00');
-        $serverType = (string) $this->protocol;
+        $serverType = strtolower((string) $this->protocol);
 
         if ($serverId <= 0 || $serverType === '') {
             return;
@@ -57,26 +58,29 @@ class StatUserServerJob implements ShouldQueue
                         continue;
                     }
 
-                    DB::statement(
-                        'INSERT INTO v2_stat_user_server
-                            (user_id, server_id, server_type, server_rate, u, d, record_type, record_at, created_at, updated_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                         ON DUPLICATE KEY UPDATE
-                            u = u + VALUES(u),
-                            d = d + VALUES(d),
-                            updated_at = VALUES(updated_at)',
-                        [
-                            (int) $userId,
-                            $serverId,
-                            $serverType,
-                            $serverRate,
-                            $u,
-                            $d,
-                            $this->recordType,
-                            $recordAt,
-                            $now,
-                            $now,
-                        ]
+                    $this->incrementStatTable(
+                        'v2_stat_user_server',
+                        (int) $userId,
+                        $serverId,
+                        $serverType,
+                        $serverRate,
+                        $u,
+                        $d,
+                        $this->recordType,
+                        $dayRecordAt,
+                        $now
+                    );
+                    $this->incrementStatTable(
+                        'v2_stat_user_server_hour',
+                        (int) $userId,
+                        $serverId,
+                        $serverType,
+                        $serverRate,
+                        $u,
+                        $d,
+                        'h',
+                        $hourRecordAt,
+                        $now
                     );
                 }
 
@@ -94,5 +98,30 @@ class StatUserServerJob implements ShouldQueue
                 abort(500, '用户节点统计数据失败' . $e->getMessage());
             }
         }
+    }
+
+    private function incrementStatTable($table, $userId, $serverId, $serverType, $serverRate, $u, $d, $recordType, $recordAt, $now)
+    {
+        DB::statement(
+            "INSERT INTO {$table}
+                (user_id, server_id, server_type, server_rate, u, d, record_type, record_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                u = u + VALUES(u),
+                d = d + VALUES(d),
+                updated_at = VALUES(updated_at)",
+            [
+                $userId,
+                $serverId,
+                $serverType,
+                $serverRate,
+                $u,
+                $d,
+                $recordType,
+                $recordAt,
+                $now,
+                $now,
+            ]
+        );
     }
 }
