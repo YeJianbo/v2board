@@ -198,23 +198,13 @@ class V2nodeController extends Controller
 
     private function normalizeAnyTlsSettings(array $settings): array
     {
-        $defaults = [
-            'server_name' => 'genshin.hoyoverse.com',
-            'cert_mode' => 'self',
-            'provider' => null,
-            'dns_env' => null,
-            'reject_unknown_sni' => '0',
-            'allow_insecure' => '1',
-            'server_port' => '443',
-        ];
-
-        foreach ($defaults as $key => $value) {
-            if (!array_key_exists($key, $settings) || $settings[$key] === null || $settings[$key] === '') {
-                $settings[$key] = $value;
-            }
+        if (empty($settings['server_name'])) {
+            $settings['server_name'] = 'genshin.hoyoverse.com';
         }
 
-        $settings['server_port'] = (string) $settings['server_port'];
+        if (array_key_exists('server_port', $settings) && $settings['server_port'] !== null && $settings['server_port'] !== '') {
+            $settings['server_port'] = (string) $settings['server_port'];
+        }
 
         return $settings;
     }

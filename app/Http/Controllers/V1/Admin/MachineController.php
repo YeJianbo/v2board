@@ -103,6 +103,8 @@ class MachineController extends Controller
             'route_id' => 'nullable|array',
             'rate' => 'nullable|numeric',
             'show' => 'nullable|in:0,1',
+            'tls_settings' => 'nullable|array',
+            'tls' => 'nullable|in:0,1,2',
         ]);
 
         $machine = Machine::findOrFail($params['machine_id']);
@@ -119,7 +121,12 @@ class MachineController extends Controller
         }
 
         $protocol = $params['protocol'] ?? 'anytls';
-        $tlsSettings = $this->defaultTlsSettingsForProtocol($protocol);
+        $port = $params['port'] ?? random_int(20000, 60000);
+        $serverPort = $params['server_port'] ?? $port;
+        $tlsSettings = $this->defaultTlsSettingsForProtocol(
+            $protocol,
+            $params['tls_settings'] ?? []
+        );
 
         $server = ServerV2node::create([
             'group_id' => array_values(array_map('intval', $groupIds)),
@@ -129,14 +136,14 @@ class MachineController extends Controller
             'machine_id' => $machine->id,
             'host' => $params['host'] ?? $machine->host ?: '127.0.0.1',
             'listen_ip' => '0.0.0.0',
-            'port' => $params['port'] ?? 443,
-            'server_port' => $params['server_port'] ?? ($params['port'] ?? 443),
+            'port' => $port,
+            'server_port' => $serverPort,
             'tags' => [],
             'rate' => $params['rate'] ?? 1,
             'show' => $params['show'] ?? 0,
             'sort' => null,
             'protocol' => $protocol,
-            'tls' => $protocol === 'anytls' ? 1 : 0,
+            'tls' => $params['tls'] ?? ($protocol === 'anytls' ? 1 : 0),
             'tls_settings' => $tlsSettings,
             'flow' => null,
             'network' => 'tcp',
@@ -163,21 +170,17 @@ class MachineController extends Controller
         ]);
     }
 
-    private function defaultTlsSettingsForProtocol(string $protocol): array
+    private function defaultTlsSettingsForProtocol(string $protocol, array $settings = []): array
     {
-        if ($protocol !== 'anytls') {
-            return [];
+        if (!in_array($protocol, ['anytls', 'hysteria2', 'trojan', 'tuic', 'vless', 'vmess'], true)) {
+            return $settings;
         }
 
-        return [
-            'server_name' => 'genshin.hoyoverse.com',
-            'cert_mode' => 'self',
-            'provider' => null,
-            'dns_env' => null,
-            'reject_unknown_sni' => '0',
-            'allow_insecure' => '1',
-            'server_port' => '443',
-        ];
+        if (empty($settings['server_name'])) {
+            $settings['server_name'] = 'genshin.hoyoverse.com';
+        }
+
+        return $settings;
     }
 
     // Generate deploy command for the specific machine
