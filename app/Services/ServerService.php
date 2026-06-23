@@ -266,7 +266,13 @@ class ServerService
             } else {
                 $server['port'] = (int)$server['port'];
             }
-            $server['is_online'] = (time() - 300 > $server['last_check_at']) ? 0 : 1;
+            $serverType = strtoupper($server['type']);
+            $serverId = $server['parent_id'] ?? $server['id'];
+            $lastCheckAt = (int) ($server['last_check_at'] ?? 0);
+            $lastPushAt = (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_PUSH_AT", $serverId), 0);
+            $server['last_check_at'] = $lastCheckAt;
+            $server['last_push_at'] = $lastPushAt;
+            $server['is_online'] = (time() - 300) < max($lastCheckAt, $lastPushAt) ? 1 : 0;
             $server['cache_key'] = "{$server['type']}-{$server['id']}-{$server['updated_at']}-{$server['is_online']}";
             return $server;
         }, $servers);
@@ -450,7 +456,8 @@ class ServerService
             $servers[$k]['online'] = (int) ($online ?? 0);
             $servers[$k]['last_check_at'] = $lastCheckAt;
             $servers[$k]['last_push_at'] = $lastPushAt;
-            $servers[$k]['is_online'] = (time() - 300) < $lastCheckAt ? 1 : 0;
+            $lastActiveAt = max($lastCheckAt, $lastPushAt);
+            $servers[$k]['is_online'] = (time() - 300) < $lastActiveAt ? 1 : 0;
             if (!$servers[$k]['is_online']) {
                 $servers[$k]['available_status'] = 0;
             } else if ((time() - 300) >= $lastPushAt) {
