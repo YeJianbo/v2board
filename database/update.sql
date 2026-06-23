@@ -856,3 +856,22 @@ CREATE TABLE `v2_server_v2node` (
 
 ALTER TABLE `v2_server_route`
 CHANGE `action_value` `action_value` text NULL AFTER `action`;
+
+CREATE TABLE IF NOT EXISTS `v2_stat_user_server` (
+                                                     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                                                     `user_id` int(11) NOT NULL,
+                                                     `server_id` int(11) NOT NULL COMMENT '节点id',
+                                                     `server_type` varchar(32) NOT NULL COMMENT '节点类型',
+                                                     `server_rate` decimal(10,2) NOT NULL,
+                                                     `u` bigint(20) NOT NULL,
+                                                     `d` bigint(20) NOT NULL,
+                                                     `record_type` char(2) NOT NULL,
+                                                     `record_at` int(11) NOT NULL,
+                                                     `created_at` int(11) NOT NULL,
+                                                     `updated_at` int(11) NOT NULL,
+                                                     PRIMARY KEY (`id`),
+                                                     UNIQUE KEY `user_server_type_rate_record_at` (`user_id`,`server_id`,`server_type`,`server_rate`,`record_at`),
+                                                     KEY `user_id` (`user_id`),
+                                                     KEY `server_type_index` (`server_id`,`server_type`),
+                                                     KEY `record_at` (`record_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户节点数据统计';

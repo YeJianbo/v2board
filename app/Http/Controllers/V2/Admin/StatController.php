@@ -9,6 +9,7 @@ use App\Models\Server;
 use App\Models\Stat;
 use App\Models\StatServer;
 use App\Models\StatUser;
+use App\Models\StatUserServer;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Services\StatisticalService;
@@ -298,16 +299,16 @@ class StatController extends Controller
         ]);
 
         $userId = (int) $request->input('user_id');
-        $userStatsQuery = StatUser::where('user_id', $userId);
+        $statsQuery = StatUserServer::where('user_id', $userId);
 
         if ($request->input('start_time')) {
-            $userStatsQuery->where('record_at', '>=', (int) $request->input('start_time'));
+            $statsQuery->where('record_at', '>=', (int) $request->input('start_time'));
         }
         if ($request->input('end_time')) {
-            $userStatsQuery->where('record_at', '<=', (int) $request->input('end_time'));
+            $statsQuery->where('record_at', '<=', (int) $request->input('end_time'));
         }
 
-        $range = (clone $userStatsQuery)
+        $range = (clone $statsQuery)
             ->selectRaw('MIN(record_at) as start_at, MAX(record_at) as end_at, SUM(u + d) as user_total')
             ->first();
 
@@ -318,25 +319,25 @@ class StatController extends Controller
                     'start_at' => null,
                     'end_at' => null,
                     'user_total' => 0,
-                    'note' => '当前统计表未记录用户-节点维度，只能在用户统计时间范围内展示节点总流量。',
+                    'note' => '节点维度流量从新版部署后开始统计，历史数据无法拆分到节点。',
                 ],
             ];
         }
 
-        $rows = StatServer::selectRaw('server_id as id, server_type, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
-            ->where('record_at', '>=', (int) $range->start_at)
-            ->where('record_at', '<=', (int) $range->end_at)
+        $rows = (clone $statsQuery)
+            ->selectRaw('server_id as id, server_type, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
             ->groupBy('server_id', 'server_type')
             ->orderBy('total', 'DESC')
             ->get();
 
         $names = $this->resolveNodeRankNames($rows);
+        $protocols = $this->resolveNodeRankProtocols($rows);
 
-        $data = $rows->map(function ($row) use ($names) {
+        $data = $rows->map(function ($row) use ($names, $protocols) {
             $key = $this->buildNodeRankKey($row->server_type ?? null, $row->id);
             return [
                 'id' => (int) $row->id,
-                'type' => (string) $row->server_type,
+                'type' => (string) ($protocols[$key] ?? $row->server_type),
                 'name' => $names[$key] ?? "Node {$row->id}",
                 'u' => (int) $row->u,
                 'd' => (int) $row->d,
@@ -350,7 +351,7 @@ class StatController extends Controller
                 'start_at' => (int) $range->start_at,
                 'end_at' => (int) $range->end_at,
                 'user_total' => (int) $range->user_total,
-                'note' => '当前统计表未记录用户-节点维度，只能在用户统计时间范围内展示节点总流量。',
+                'note' => null,
             ],
         ];
     }
