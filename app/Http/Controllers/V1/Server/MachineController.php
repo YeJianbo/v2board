@@ -119,9 +119,33 @@ class MachineController extends Controller
             return;
         }
 
-        if (!in_array($request->ip(), $allowedIps, true)) {
+        $candidateIps = array_filter(array_unique(array_merge(
+            [$request->ip()],
+            $this->extractForwardedIps($request)
+        )));
+
+        if (!array_intersect($candidateIps, $allowedIps)) {
             abort(401, 'Unauthorized: IP is not allowed');
         }
+    }
+
+    private function extractForwardedIps(Request $request): array
+    {
+        $ips = [];
+        $cfConnectingIp = trim((string) $request->headers->get('CF-Connecting-IP', ''));
+        if (filter_var($cfConnectingIp, FILTER_VALIDATE_IP)) {
+            $ips[] = $cfConnectingIp;
+        }
+
+        $forwardedFor = (string) $request->headers->get('X-Forwarded-For', '');
+        foreach (explode(',', $forwardedFor) as $ip) {
+            $ip = trim($ip);
+            if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                $ips[] = $ip;
+            }
+        }
+
+        return $ips;
     }
 
     public function config(Request $request)
