@@ -45,8 +45,11 @@ class V2nodeController extends Controller
             'show' => 'nullable|in:0,1',
             'sort' => 'nullable'
         ]);
-        if ($params['protocol'] == 'anytls' && $params['tls'] === 0) {
+        if ($params['protocol'] == 'anytls' && (int) $params['tls'] === 0) {
             $params['tls'] = 1;
+        }
+        if ($params['protocol'] == 'anytls') {
+            $params['tls_settings'] = $this->normalizeAnyTlsSettings($params['tls_settings'] ?? []);
         }
         if (in_array($params['protocol'], ['hysteria2', 'trojan', 'tuic'])) {
             $params['tls'] = 1;
@@ -191,6 +194,29 @@ class V2nodeController extends Controller
         return response([
             'data' => true
         ]);
+    }
+
+    private function normalizeAnyTlsSettings(array $settings): array
+    {
+        $defaults = [
+            'server_name' => 'genshin.hoyoverse.com',
+            'cert_mode' => 'self',
+            'provider' => null,
+            'dns_env' => null,
+            'reject_unknown_sni' => '0',
+            'allow_insecure' => '1',
+            'server_port' => '443',
+        ];
+
+        foreach ($defaults as $key => $value) {
+            if (!array_key_exists($key, $settings) || $settings[$key] === null || $settings[$key] === '') {
+                $settings[$key] = $value;
+            }
+        }
+
+        $settings['server_port'] = (string) $settings['server_port'];
+
+        return $settings;
     }
 
     public function drop(Request $request)

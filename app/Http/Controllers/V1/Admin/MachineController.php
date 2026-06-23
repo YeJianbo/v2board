@@ -118,6 +118,9 @@ class MachineController extends Controller
             abort(422, '请先创建至少一个权限组');
         }
 
+        $protocol = $params['protocol'] ?? 'anytls';
+        $tlsSettings = $this->defaultTlsSettingsForProtocol($protocol);
+
         $server = ServerV2node::create([
             'group_id' => array_values(array_map('intval', $groupIds)),
             'route_id' => array_values(array_map('intval', $params['route_id'] ?? [])),
@@ -132,9 +135,9 @@ class MachineController extends Controller
             'rate' => $params['rate'] ?? 1,
             'show' => $params['show'] ?? 0,
             'sort' => null,
-            'protocol' => $params['protocol'] ?? 'vmess',
-            'tls' => 0,
-            'tls_settings' => [],
+            'protocol' => $protocol,
+            'tls' => $protocol === 'anytls' ? 1 : 0,
+            'tls_settings' => $tlsSettings,
             'flow' => null,
             'network' => 'tcp',
             'network_settings' => [],
@@ -158,6 +161,23 @@ class MachineController extends Controller
                 'machine_id' => $machine->id,
             ],
         ]);
+    }
+
+    private function defaultTlsSettingsForProtocol(string $protocol): array
+    {
+        if ($protocol !== 'anytls') {
+            return [];
+        }
+
+        return [
+            'server_name' => 'genshin.hoyoverse.com',
+            'cert_mode' => 'self',
+            'provider' => null,
+            'dns_env' => null,
+            'reject_unknown_sni' => '0',
+            'allow_insecure' => '1',
+            'server_port' => '443',
+        ];
     }
 
     // Generate deploy command for the specific machine
