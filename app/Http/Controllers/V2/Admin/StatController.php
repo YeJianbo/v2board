@@ -13,6 +13,7 @@ use App\Models\Ticket;
 use App\Models\User;
 use App\Services\StatisticalService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class StatController extends Controller
 {
@@ -33,16 +34,48 @@ class StatController extends Controller
             + \App\Models\ServerV2node::count();
     }
 
+    private function getOnlineUserSummary(): array
+    {
+        $onlineUsers = 0;
+        $onlineDevices = 0;
+
+        foreach (User::query()->pluck('id') as $userId) {
+            $state = Cache::get('ALIVE_IP_USER_' . $userId);
+            if (!is_array($state)) {
+                continue;
+            }
+
+            $count = (int) ($state['alive_ip'] ?? 0);
+            if ($count <= 0) {
+                continue;
+            }
+
+            $onlineUsers++;
+            $onlineDevices += $count;
+        }
+
+        if ($onlineUsers === 0) {
+            $fallback = User::where('t', '>=', time() - 600)->count();
+            return [
+                'users' => $fallback,
+                'devices' => $fallback,
+            ];
+        }
+
+        return [
+            'users' => $onlineUsers,
+            'devices' => $onlineDevices,
+        ];
+    }
+
 
 
     public function getOverride(Request $request)
     {
         $onlineNodes = $this->getTotalNodesCount();
-        // 获取在线设备数和在线用户数
-        $onlineDevices = User::where('t', '>=', time() - 600)
-            ->count();
-        $onlineUsers = User::where('t', '>=', time() - 600)
-            ->count();
+        $onlineSummary = $this->getOnlineUserSummary();
+        $onlineDevices = $onlineSummary['devices'];
+        $onlineUsers = $onlineSummary['users'];
 
         // 获取今日流量统计
         $todayStart = strtotime('today');
@@ -345,11 +378,9 @@ class StatController extends Controller
         // 获取在线节点数
         $onlineNodes = $this->getTotalNodesCount();
 
-        // 获取在线设备数和在线用户数
-        $onlineDevices = User::where('t', '>=', time() - 600)
-            ->count();
-        $onlineUsers = User::where('t', '>=', time() - 600)
-            ->count();
+        $onlineSummary = $this->getOnlineUserSummary();
+        $onlineDevices = $onlineSummary['devices'];
+        $onlineUsers = $onlineSummary['users'];
 
         // 获取今日流量统计
         $todayTraffic = StatServer::where('record_at', '>=', $todayStart)
