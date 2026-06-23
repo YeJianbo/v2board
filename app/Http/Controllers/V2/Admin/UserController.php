@@ -20,6 +20,7 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -210,7 +211,38 @@ class UserController extends Controller
         $user['balance'] = $user['balance'] / 100;
         $user['commission_balance'] = $user['commission_balance'] / 100;
         $user['subscribe_url'] = Helper::getSubscribeUrl($user['token']);
+        $online = self::getOnlineState((int) $user['id']);
+        $user['online_count'] = $online['count'];
+        $user['alive_ip'] = $online['count'];
+        $user['ips'] = $online['ips'];
         return HookManager::filter('admin.user.transform', $user, $model);
+    }
+
+    private static function getOnlineState(int $userId): array
+    {
+        $count = 0;
+        $ips = [];
+        $state = Cache::get('ALIVE_IP_USER_' . $userId);
+
+        if (is_array($state)) {
+            $count = (int) ($state['alive_ip'] ?? 0);
+            foreach ($state as $nodeKey => $data) {
+                if ($nodeKey === 'alive_ip' || !is_array($data) || !isset($data['aliveips'])) {
+                    continue;
+                }
+                foreach ((array) $data['aliveips'] as $ipNodeId) {
+                    $ip = explode('_', (string) $ipNodeId)[0];
+                    if ($ip !== '') {
+                        $ips[] = $ip . '_' . $nodeKey;
+                    }
+                }
+            }
+        }
+
+        return [
+            'count' => $count,
+            'ips' => implode(', ', $ips),
+        ];
     }
 
     public function getUserInfoById(Request $request)
@@ -221,6 +253,12 @@ class UserController extends Controller
             'id.required' => '用户ID不能为空'
         ]);
         $user = User::find($request->input('id'))->load('invite_user');
+        if ($user) {
+            $online = self::getOnlineState((int) $user->id);
+            $user->setAttribute('online_count', $online['count']);
+            $user->setAttribute('alive_ip', $online['count']);
+            $user->setAttribute('ips', $online['ips']);
+        }
         $user = HookManager::filter('admin.user.detail', $user, $request);
         return $this->success($user);
     }

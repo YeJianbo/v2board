@@ -99,6 +99,7 @@ class UserController extends Controller
                 }
             }
             $res[$i]['alive_ip'] = $countalive;
+            $res[$i]['online_count'] = $countalive;
             $res[$i]['ips'] = implode(', ', $ips);
             $res[$i]['subscribe_url'] = Helper::getSubscribeUrl($res[$i]['token']);
         }
