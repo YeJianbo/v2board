@@ -1,1 +1,0 @@
-import{Ra as e,Va as t,_a as n,ma as r}from"./vendor-DptLH-vH.js";import{b as i}from"./index-Dt5C2fhW.js";var a={class:`not-found`},o=i({__name:`NotFoundPage`,setup(i){return e(()=>{document.title=`404 Not Found`}),(e,i)=>(t(),n(`div`,a,[...i[0]||(i[0]=[r(`h1`,null,`404 Not Found`,-1),r(`p`,null,`nginx`,-1)])]))}},[[`__scopeId`,`data-v-fb2e0a68`]]);export{o as default};
