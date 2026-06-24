@@ -180,8 +180,8 @@ class MachineController extends Controller
     private function resolveRequestRemoteIp(Request $request): string
     {
         $candidateIps = array_filter(array_unique(array_merge(
-            [$request->ip()],
-            $this->extractForwardedIps($request)
+            $this->extractForwardedIps($request),
+            [$request->ip()]
         )));
 
         foreach ($candidateIps as $candidateIp) {
