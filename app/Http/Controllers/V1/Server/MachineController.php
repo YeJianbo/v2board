@@ -114,7 +114,12 @@ class MachineController extends Controller
             return;
         }
 
-        $allowedIps = array_filter(array_map('trim', explode(',', $machine->host)));
+        $allowedIps = array_values(array_filter(
+            array_map('trim', explode(',', $machine->host)),
+            function ($ip) {
+                return filter_var($ip, FILTER_VALIDATE_IP) && !$this->isPrivateIp($ip);
+            }
+        ));
         if (!$allowedIps) {
             return;
         }
