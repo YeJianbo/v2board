@@ -148,9 +148,91 @@ class MachineController extends Controller
         return $ips;
     }
 
+    private function decodeMachineStatus(Machine $machine): array
+    {
+        if (empty($machine->status)) {
+            return [];
+        }
+
+        $decoded = json_decode((string) $machine->status, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+            return [];
+        }
+
+        return $decoded;
+    }
+
+    private function isPrivateIp(?string $ip): bool
+    {
+        $ip = trim((string) $ip);
+        if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
+    }
+
+    private function resolveRequestRemoteIp(Request $request): string
+    {
+        $candidateIps = array_filter(array_unique(array_merge(
+            [$request->ip()],
+            $this->extractForwardedIps($request)
+        )));
+
+        foreach ($candidateIps as $candidateIp) {
+            if (!$this->isPrivateIp($candidateIp)) {
+                return $candidateIp;
+            }
+        }
+
+        return (string) ($candidateIps[0] ?? '');
+    }
+
+    private function resolvePrimaryIp(?string $reportedIp, ?string $remoteIp): string
+    {
+        $reportedIp = trim((string) $reportedIp);
+        $remoteIp = trim((string) $remoteIp);
+
+        if ($reportedIp !== '' && !$this->isPrivateIp($reportedIp)) {
+            return $reportedIp;
+        }
+
+        if ($remoteIp !== '' && !$this->isPrivateIp($remoteIp)) {
+            return $remoteIp;
+        }
+
+        return $reportedIp !== '' ? $reportedIp : $remoteIp;
+    }
+
+    private function touchMachineHeartbeat(Machine $machine, Request $request, array $extraStatus = []): void
+    {
+        $status = $this->decodeMachineStatus($machine);
+        $remoteIp = $this->resolveRequestRemoteIp($request);
+        $reportedIp = trim((string) ($extraStatus['ip'] ?? ($status['ip'] ?? '')));
+        $primaryIp = $this->resolvePrimaryIp($reportedIp, $remoteIp);
+
+        if ($remoteIp !== '') {
+            $status['remote_ip'] = $remoteIp;
+        }
+        if ($primaryIp !== '') {
+            $status['primary_ip'] = $primaryIp;
+        }
+        $status['reported_at'] = time();
+
+        foreach ($extraStatus as $key => $value) {
+            if ($value !== null && $value !== '') {
+                $status[$key] = $value;
+            }
+        }
+
+        $machine->status = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $machine->save();
+    }
+
     public function config(Request $request)
     {
         $machine = $this->authenticate($request);
+        $this->touchMachineHeartbeat($machine, $request);
         $nodes = [];
 
         // In local environment without a proper app_url, we just default to local
@@ -218,6 +300,9 @@ class MachineController extends Controller
             $data = $request->all();
         }
         
+        $remoteIp = $this->resolveRequestRemoteIp($request);
+        $reportedIp = trim((string) ($data['ip'] ?? ''));
+
         $status = [
             'cpu' => $data['cpu'] ?? 0,
             'mem' => $data['mem'] ?? 0,
@@ -225,13 +310,14 @@ class MachineController extends Controller
             'net_out' => $data['net_tx'] ?? 0,
             'net_in' => $data['net_rx'] ?? 0,
             'uptime' => $data['uptime'] ?? 0,
-            'ip' => $data['ip'] ?? $request->ip(),
-            'remote_ip' => $request->ip(),
+            'ip' => $reportedIp !== '' ? $reportedIp : $remoteIp,
+            'remote_ip' => $remoteIp,
+            'primary_ip' => $this->resolvePrimaryIp($reportedIp, $remoteIp),
+            'reported_at' => time(),
             'version' => $data['version'] ?? 'unknown'
         ];
         
-        $machine->status = json_encode($status);
-        $machine->save();
+        $this->touchMachineHeartbeat($machine, $request, $status);
 
         return response()->json([
             'data' => 'success'
@@ -289,6 +375,7 @@ class MachineController extends Controller
     public function v2nodeConfig(Request $request)
     {
         $machine = $this->authenticate($request);
+        $this->touchMachineHeartbeat($machine, $request);
 
         $apiHost = rtrim((string) (
             $this->panelSetting('server_api_url')
@@ -327,6 +414,7 @@ class MachineController extends Controller
     public function restartAck(Request $request)
     {
         $machine = $this->authenticate($request);
+        $this->touchMachineHeartbeat($machine, $request);
         $params = $request->validate([
             'restart_token' => 'required|string',
         ]);

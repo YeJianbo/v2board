@@ -13,28 +13,26 @@ use Illuminate\Support\Str;
 class MachineController extends Controller
 {
     private const INSTALL_TOKEN_TTL_SECONDS = 604800;
+    private const ONLINE_WINDOW_SECONDS = 180;
 
     public function fetch(Request $request)
     {
-        $onlineWindowSeconds = 180;
-
         return response([
-            'data' => Machine::orderBy('id', 'DESC')->get()->map(function (Machine $machine) use ($onlineWindowSeconds) {
-                $status = null;
-                if (!empty($machine->status)) {
-                    $decoded = json_decode($machine->status, true);
-                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                        $status = $decoded;
-                    }
-                }
-
-                $lastSeenAt = (int) ($machine->updated_at ?? 0);
-                $isOnline = !empty($status) && $lastSeenAt > 0 && (time() - $lastSeenAt) < $onlineWindowSeconds;
+            'data' => Machine::orderBy('id', 'DESC')->get()->map(function (Machine $machine) {
+                $status = $this->decodeStatus($machine->status);
+                $lastSeenAt = $this->resolveLastSeenAt($machine, $status);
+                $isOnline = $lastSeenAt > 0 && (time() - $lastSeenAt) < self::ONLINE_WINDOW_SECONDS;
+                $reportedIp = $this->resolveReportedIp($status);
+                $displayHost = $this->resolveDisplayHost($machine->host, $status);
 
                 return [
                     'id' => $machine->id,
                     'name' => $machine->name,
-                    'host' => $machine->host,
+                    'host' => $displayHost,
+                    'configured_host' => $machine->host,
+                    'display_host' => $displayHost,
+                    'connect_host' => $displayHost ?: ($reportedIp ?: (string) $machine->host),
+                    'reported_ip' => $reportedIp,
                     'api_token' => $machine->api_token,
                     'status' => $machine->status,
                     'status_data' => $status,
@@ -45,6 +43,72 @@ class MachineController extends Controller
                 ];
             })->values()
         ]);
+    }
+
+    private function decodeStatus($rawStatus): ?array
+    {
+        if (empty($rawStatus)) {
+            return null;
+        }
+
+        $decoded = json_decode((string) $rawStatus, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+            return null;
+        }
+
+        return $decoded;
+    }
+
+    private function resolveLastSeenAt(Machine $machine, ?array $status): int
+    {
+        $reportedAt = (int) ($status['reported_at'] ?? 0);
+        if ($reportedAt > 0) {
+            return $reportedAt;
+        }
+
+        return (int) ($machine->updated_at ?? 0);
+    }
+
+    private function resolveReportedIp(?array $status): string
+    {
+        foreach (['primary_ip', 'remote_ip', 'ip'] as $key) {
+            $value = trim((string) ($status[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
+    }
+
+    private function resolveDisplayHost(?string $configuredHost, ?array $status): string
+    {
+        $configuredHost = trim((string) $configuredHost);
+        $reportedIp = $this->resolveReportedIp($status);
+
+        if ($configuredHost === '') {
+            return $reportedIp;
+        }
+
+        if (
+            $reportedIp !== '' &&
+            $this->isPrivateIp($configuredHost) &&
+            !$this->isPrivateIp($reportedIp)
+        ) {
+            return $reportedIp;
+        }
+
+        return $configuredHost;
+    }
+
+    private function isPrivateIp(?string $ip): bool
+    {
+        $ip = trim((string) $ip);
+        if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
     }
 
     public function save(Request $request)
