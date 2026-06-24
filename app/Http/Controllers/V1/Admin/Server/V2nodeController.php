@@ -4,12 +4,31 @@ namespace App\Http\Controllers\V1\Admin\Server;
 
 use App\Http\Controllers\Controller;
 use App\Models\ServerV2node;
+use App\Services\NodeSyncService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use ParagonIE_Sodium_Compat as SodiumCompat;
 use App\Utils\Helper;
+use Illuminate\Support\Str;
 
 class V2nodeController extends Controller
 {
+    private const RESTART_TOKEN_TTL_SECONDS = 300;
+
+    private function notifyMachineNodesChanged(array $machineIds): void
+    {
+        $machineIds = array_values(array_unique(array_filter(array_map('intval', $machineIds))));
+
+        foreach ($machineIds as $machineId) {
+            NodeSyncService::notifyMachineNodesChanged($machineId);
+            Cache::put(
+                'v2node_probe_restart:' . $machineId,
+                (string) time() . '-' . Str::random(12),
+                self::RESTART_TOKEN_TTL_SECONDS
+            );
+        }
+    }
+
     public function save(Request $request)
     {
         $params = $request->validate([
@@ -178,19 +197,30 @@ class V2nodeController extends Controller
             if (!$server) {
                 abort(500, '服务器不存在');
             }
+            $originalMachineId = (int) ($server->machine_id ?: 0);
             try {
                 $server->update($params);
             } catch (\Exception $e) {
                 abort(500, '保存失败');
             }
+
+            $this->notifyMachineNodesChanged([
+                $originalMachineId,
+                (int) ($server->machine_id ?: 0),
+            ]);
             return response([
                 'data' => true
             ]);
         }
 
-        if (!ServerV2node::create($params)) {
+        $server = ServerV2node::create($params);
+        if (!$server) {
             abort(500, '创建失败');
         }
+
+        $this->notifyMachineNodesChanged([
+            (int) ($server->machine_id ?: 0),
+        ]);
         return response([
             'data' => true
         ]);
@@ -217,8 +247,11 @@ class V2nodeController extends Controller
                 abort(500, '节点ID不存在');
             }
         }
+        $machineId = (int) ($server->machine_id ?: 0);
+        $result = $server->delete();
+        $this->notifyMachineNodesChanged([$machineId]);
         return response([
-            'data' => $server->delete()
+            'data' => $result
         ]);
     }
 
@@ -234,11 +267,16 @@ class V2nodeController extends Controller
         if (!$server) {
             abort(500, '该服务器不存在');
         }
+        $originalMachineId = (int) ($server->machine_id ?: 0);
         try {
             $server->update($params);
         } catch (\Exception $e) {
             abort(500, '保存失败');
         }
+        $this->notifyMachineNodesChanged([
+            $originalMachineId,
+            (int) ($server->machine_id ?: 0),
+        ]);
         return response([
             'data' => true
         ]);
@@ -251,9 +289,14 @@ class V2nodeController extends Controller
         if (!$server) {
             abort(500, '服务器不存在');
         }
-        if (!ServerV2node::create($server->toArray())) {
+        $copiedServer = ServerV2node::create($server->toArray());
+        if (!$copiedServer) {
             abort(500, '复制失败');
         }
+
+        $this->notifyMachineNodesChanged([
+            (int) ($copiedServer->machine_id ?: 0),
+        ]);
 
         return response([
             'data' => true

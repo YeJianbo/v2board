@@ -6,14 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\Machine;
 use App\Models\ServerGroup;
 use App\Models\ServerV2node;
+use App\Services\NodeSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Str;
 
 class MachineController extends Controller
 {
     private const INSTALL_TOKEN_TTL_SECONDS = 604800;
     private const ONLINE_WINDOW_SECONDS = 180;
+    private const RESTART_TOKEN_TTL_SECONDS = 300;
 
     public function fetch(Request $request)
     {
@@ -23,7 +26,13 @@ class MachineController extends Controller
                 $lastSeenAt = $this->resolveLastSeenAt($machine, $status);
                 $isOnline = $lastSeenAt > 0 && (time() - $lastSeenAt) < self::ONLINE_WINDOW_SECONDS;
                 $reportedIp = $this->resolveReportedIp($status);
-                $displayHost = $this->resolveDisplayHost($machine->host, $status);
+                $ddnsHost = $this->resolveDdnsHost($machine);
+                $displayHost = $this->resolveDisplayHost($machine->host, $status, $ddnsHost);
+                $countryCode = strtoupper((string) ($status['country_code'] ?? ''));
+                $country = (string) ($status['country'] ?? '');
+                $ddnsLastSyncedAt = (int) ($status['ddns_synced_at'] ?? 0);
+                $ddnsLastSyncedIp = trim((string) ($status['ddns_synced_ip'] ?? ''));
+                $ddnsError = trim((string) ($status['ddns_error'] ?? ''));
 
                 return [
                     'id' => $machine->id,
@@ -36,6 +45,20 @@ class MachineController extends Controller
                     'api_token' => $machine->api_token,
                     'status' => $machine->status,
                     'status_data' => $status,
+                    'country_code' => $countryCode,
+                    'country' => $country,
+                    'ddns_enabled' => (int) ($machine->ddns_enabled ? 1 : 0),
+                    'ddns_provider' => (string) ($machine->ddns_provider ?: 'cloudflare'),
+                    'ddns_zone_name' => (string) ($machine->ddns_zone_name ?: ''),
+                    'ddns_record_name' => (string) ($machine->ddns_record_name ?: ''),
+                    'ddns_record_type' => (string) ($machine->ddns_record_type ?: 'A'),
+                    'ddns_ttl' => (int) ($machine->ddns_ttl ?: 120),
+                    'ddns_proxied' => (int) ($machine->ddns_proxied ? 1 : 0),
+                    'ddns_has_api_token' => $this->machineHasDdnsApiToken($machine) ? 1 : 0,
+                    'ddns_host' => $ddnsHost,
+                    'ddns_last_synced_ip' => $ddnsLastSyncedIp,
+                    'ddns_last_synced_at' => $ddnsLastSyncedAt,
+                    'ddns_error' => $ddnsError,
                     'is_online' => $isOnline ? 1 : 0,
                     'last_seen_at' => $lastSeenAt,
                     'created_at' => $machine->created_at,
@@ -81,10 +104,15 @@ class MachineController extends Controller
         return '';
     }
 
-    private function resolveDisplayHost(?string $configuredHost, ?array $status): string
+    private function resolveDisplayHost(?string $configuredHost, ?array $status, ?string $ddnsHost = null): string
     {
         $configuredHost = trim((string) $configuredHost);
+        $ddnsHost = trim((string) $ddnsHost);
         $reportedIp = $this->resolveReportedIp($status);
+
+        if ($ddnsHost !== '') {
+            return $ddnsHost;
+        }
 
         if ($configuredHost === '') {
             return $reportedIp;
@@ -101,6 +129,50 @@ class MachineController extends Controller
         return $configuredHost;
     }
 
+    private function resolveDdnsHost(Machine $machine): string
+    {
+        $recordName = trim((string) $machine->ddns_record_name);
+        $zoneName = trim((string) $machine->ddns_zone_name);
+
+        if ($recordName === '') {
+            return '';
+        }
+
+        if ($recordName === '@') {
+            return $zoneName;
+        }
+
+        if ($zoneName !== '' && preg_match('/(^|\.)' . preg_quote($zoneName, '/') . '$/i', $recordName)) {
+            return $recordName;
+        }
+
+        return $zoneName !== '' ? "{$recordName}.{$zoneName}" : $recordName;
+    }
+
+    private function machineHasDdnsApiToken(Machine $machine): bool
+    {
+        return trim((string) $machine->ddns_api_token) !== '';
+    }
+
+    private function encryptMachineDdnsApiToken(?string $value): ?string
+    {
+        $value = trim((string) $value);
+        return $value === '' ? null : Crypt::encryptString($value);
+    }
+
+    private function notifyMachineNodeSetChanged(int $machineId, bool $queueRestart = true): void
+    {
+        NodeSyncService::notifyMachineNodesChanged($machineId);
+
+        if ($queueRestart) {
+            Cache::put(
+                'v2node_probe_restart:' . $machineId,
+                (string) time() . '-' . Str::random(12),
+                self::RESTART_TOKEN_TTL_SECONDS
+            );
+        }
+    }
+
     private function isPrivateIp(?string $ip): bool
     {
         $ip = trim((string) $ip);
@@ -114,15 +186,38 @@ class MachineController extends Controller
     public function save(Request $request)
     {
         $params = $request->validate([
-            'name' => 'required',
-            'host' => 'nullable'
+            'name' => 'required|string|max:100',
+            'host' => 'nullable|string|max:255',
+            'ddns_enabled' => 'nullable|boolean',
+            'ddns_provider' => 'nullable|string|in:cloudflare',
+            'ddns_zone_name' => 'nullable|string|max:191',
+            'ddns_record_name' => 'nullable|string|max:191',
+            'ddns_record_type' => 'nullable|string|in:A,AAAA',
+            'ddns_ttl' => 'nullable|integer|min:120|max:86400',
+            'ddns_proxied' => 'nullable|boolean',
+            'ddns_api_token' => 'nullable|string|max:4096',
         ]);
+
+        $params['host'] = trim((string) ($params['host'] ?? ''));
+        $params['ddns_enabled'] = (int) ($request->boolean('ddns_enabled'));
+        $params['ddns_provider'] = $params['ddns_enabled'] ? ($params['ddns_provider'] ?? 'cloudflare') : null;
+        $params['ddns_zone_name'] = trim((string) ($params['ddns_zone_name'] ?? ''));
+        $params['ddns_record_name'] = trim((string) ($params['ddns_record_name'] ?? ''));
+        $params['ddns_record_type'] = strtoupper((string) ($params['ddns_record_type'] ?? 'A')) ?: 'A';
+        $params['ddns_ttl'] = (int) ($params['ddns_ttl'] ?? 120);
+        $params['ddns_proxied'] = (int) ($request->boolean('ddns_proxied'));
+        $incomingDdnsApiToken = trim((string) ($params['ddns_api_token'] ?? ''));
+        unset($params['ddns_api_token']);
 
         if ($request->input('id')) {
             $machine = Machine::findOrFail($request->input('id'));
+            if ($incomingDdnsApiToken !== '') {
+                $params['ddns_api_token'] = $this->encryptMachineDdnsApiToken($incomingDdnsApiToken);
+            }
             $machine->update($params);
         } else {
             $params['api_token'] = Str::random(32);
+            $params['ddns_api_token'] = $this->encryptMachineDdnsApiToken($incomingDdnsApiToken);
             Machine::create($params);
         }
 
@@ -225,6 +320,8 @@ class MachineController extends Controller
             'obfs_password' => null,
             'padding_scheme' => [],
         ]);
+
+        $this->notifyMachineNodeSetChanged((int) $machine->id);
 
         return response([
             'data' => [
