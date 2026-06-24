@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Models\Server;
-use App\Models\ServerMachine;
+use App\Models\ServerV2node;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -128,19 +128,18 @@ class NodeSyncService
      */
     public static function notifyMachineNodesChanged(int $machineId): void
     {
-        $machine = ServerMachine::find($machineId);
+        $nodeList = ServerV2node::query()
+            ->where('machine_id', $machineId)
+            ->orderBy('id')
+            ->get()
+            ->map(fn($n) => [
+                'id' => (int) $n->id,
+                'type' => 'v2node',
+                'name' => (string) $n->name,
+            ])
+            ->values()
+            ->toArray();
 
-        $nodeList = [];
-        if ($machine) {
-            $nodes = ServerService::getMachineNodes($machine);
-            $nodeList = $nodes->map(fn($n) => [
-                'id' => $n->id,
-                'type' => $n->type,
-                'name' => $n->name,
-            ])->values()->toArray();
-        }
-
-        // Always publish via Redis so the WS process can update its in-memory registry
         self::pushMachine($machineId, 'sync.nodes', ['nodes' => $nodeList]);
     }
 
