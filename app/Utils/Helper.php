@@ -6,6 +6,22 @@ use Illuminate\Support\Facades\Cache;
 
 class Helper
 {
+    public static function shouldSkipCertVerify(array $server = [], array $tlsSettings = []): bool
+    {
+        $serverInsecure = $server['allow_insecure'] ?? $server['insecure'] ?? null;
+        if ($serverInsecure !== null) {
+            return (int) $serverInsecure === 1;
+        }
+
+        $tlsInsecure = $tlsSettings['allow_insecure'] ?? $tlsSettings['allowInsecure'] ?? null;
+        if ($tlsInsecure !== null) {
+            return (int) $tlsInsecure === 1;
+        }
+
+        $certMode = strtolower((string) ($tlsSettings['cert_mode'] ?? $tlsSettings['certMode'] ?? ''));
+        return $certMode === 'self';
+    }
+
     public static function uuidToBase64($uuid, $length)
     {
         return base64_encode(substr($uuid, 0, $length));
@@ -405,7 +421,7 @@ class Helper
         $firstPort = strpos($parts[0], '-') !== false ? explode('-', $parts[0])[0] : $parts[0];
         $tlsSettings = $server['tls_settings'] ?? [];
         $insecure = $tlsSettings['allow_insecure'] ?? 0;
-        $sni = $tlsSettings['server_name'] ?? '';
+        $sni = $tlsSettings['server_name'] ?? ($server['server_name'] ?? 'genshin.hoyoverse.com');
         $uri = "hysteria2://{$password}@{$remote}:{$firstPort}/?insecure={$insecure}&sni={$sni}";
 
         if (isset($server['obfs']) && isset($server['obfs_password'])) {

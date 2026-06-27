@@ -366,7 +366,7 @@ class ClashNyanpasu
         };
         $tlsSettings = $server['tls_settings'] ?? [];
         $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
-        $array['skip-cert-verify'] = ($server['allow_insecure'] ?? ($tlsSettings['allow_insecure'] ?? 0)) == 1 ? true : false;
+        $array['skip-cert-verify'] = Helper::shouldSkipCertVerify($server, $tlsSettings);
         if (!empty($tlsSettings['ech'])) {
             if ($tlsSettings['ech'] === 'cloudflare') {
                 $array['ech-opts'] = [
@@ -399,7 +399,7 @@ class ClashNyanpasu
             'congestion-controller' => $server['congestion_control'] ?? 'cubic',
         ];
         $tlsSettings = $server['tls_settings'] ?? [];
-        $array['skip-cert-verify'] = ($server['insecure'] ?? ($tlsSettings['allow_insecure'] ?? 0)) == 1 ? true : false;
+        $array['skip-cert-verify'] = Helper::shouldSkipCertVerify($server, $tlsSettings);
         $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
 
         return $array;
@@ -422,7 +422,7 @@ class ClashNyanpasu
         ];
         $tlsSettings = $server['tls_settings'] ?? [];
         $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
-        $array['skip-cert-verify'] = ($server['insecure'] ?? ($tlsSettings['allow_insecure'] ?? 0)) == 1 ? true : false;
+        $array['skip-cert-verify'] = Helper::shouldSkipCertVerify($server, $tlsSettings);
         return $array;
     }
 
@@ -475,13 +475,14 @@ class ClashNyanpasu
     private function buildHysteria2($password, $server)
     {
         $tlsSettings = $server['tls_settings'] ?? [];
+        $sni = $tlsSettings['server_name'] ?? ($server['server_name'] ?? 'genshin.hoyoverse.com');
         $array = [
             'name' => $server['name'],
             'type' => 'hysteria2',
             'server' => $server['host'],
             'password' => $password,
-            'skip-cert-verify' => ($tlsSettings['allow_insecure'] ?? 0) == 1 ? true : false,
-            'sni' => $tlsSettings['server_name'] ?? '',
+            'skip-cert-verify' => Helper::shouldSkipCertVerify($server, $tlsSettings),
+            'sni' => $sni,
             'udp' => true,
         ];
         $parts = explode(",", $server['port']);

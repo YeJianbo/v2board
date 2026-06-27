@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 
 class ServerController extends Controller
 {
+    private const DEFAULT_TLS_SERVER_NAME = 'genshin.hoyoverse.com';
     private $nodeInfo;
     private $nodeId;
     private $serverService;
@@ -23,13 +24,20 @@ class ServerController extends Controller
         return $value;
     }
 
-    private function normalizeSettingsForV2node($value)
+    private function normalizeSettingsForV2node($value, string $protocol = '', int $tlsMode = 0)
     {
         if (empty($value)) {
-            return (object) [];
+            $value = [];
         }
 
         $settings = is_array($value) ? $value : (array) $value;
+        if (
+            ($tlsMode === 1 || $tlsMode === 2) &&
+            in_array($protocol, ['anytls', 'hysteria2', 'trojan', 'tuic', 'vless', 'vmess'], true) &&
+            empty($settings['server_name'])
+        ) {
+            $settings['server_name'] = self::DEFAULT_TLS_SERVER_NAME;
+        }
         if (array_key_exists('server_port', $settings) && $settings['server_port'] !== null) {
             $settings['server_port'] = (string) $settings['server_port'];
         }
@@ -98,7 +106,11 @@ class ServerController extends Controller
             'network_settings' => $this->objectOrEmpty($this->nodeInfo->network_settings),
             'protocol' => $this->nodeInfo->protocol,
             'tls' => $this->nodeInfo->tls,
-            'tls_settings' => $this->normalizeSettingsForV2node($this->nodeInfo->tls_settings),
+            'tls_settings' => $this->normalizeSettingsForV2node(
+                $this->nodeInfo->tls_settings,
+                (string) $this->nodeInfo->protocol,
+                (int) $this->nodeInfo->tls
+            ),
             'encryption' => $this->nodeInfo->encryption,
             'encryption_settings' => $this->objectOrEmpty($this->nodeInfo->encryption_settings),
             'flow' => $this->nodeInfo->flow,

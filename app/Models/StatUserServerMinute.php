@@ -4,16 +4,13 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class Machine extends Model
+class StatUserServerMinute extends Model
 {
-    protected $table = 'v2_machine';
+    protected $table = 'v2_stat_user_server_minute';
     protected $dateFormat = 'U';
     protected $guarded = ['id'];
     protected $casts = [
-        'ddns_enabled' => 'boolean',
-        'ddns_proxied' => 'boolean',
-        'relay_rules' => 'array',
         'created_at' => 'timestamp',
-        'updated_at' => 'timestamp',
+        'updated_at' => 'timestamp'
     ];
 }

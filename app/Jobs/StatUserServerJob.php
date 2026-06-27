@@ -34,6 +34,7 @@ class StatUserServerJob implements ShouldQueue
     {
         $dayRecordAt = strtotime(date('Y-m-d'));
         $hourRecordAt = strtotime(date('Y-m-d H:00:00'));
+        $minuteRecordAt = strtotime(date('Y-m-d H:i:00'));
         $serverId = (int) ($this->server['id'] ?? 0);
         $serverRate = (string) ($this->server['rate'] ?? '1.00');
         $serverType = strtolower((string) $this->protocol);
@@ -80,6 +81,18 @@ class StatUserServerJob implements ShouldQueue
                         $d,
                         'h',
                         $hourRecordAt,
+                        $now
+                    );
+                    $this->incrementStatTable(
+                        'v2_stat_user_server_minute',
+                        (int) $userId,
+                        $serverId,
+                        $serverType,
+                        $serverRate,
+                        $u,
+                        $d,
+                        'm',
+                        $minuteRecordAt,
                         $now
                     );
                 }

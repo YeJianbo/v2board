@@ -11,6 +11,7 @@ use App\Models\StatServer;
 use App\Models\StatUser;
 use App\Models\StatUserServer;
 use App\Models\StatUserServerHour;
+use App\Models\StatUserServerMinute;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Services\StatisticalService;
@@ -353,6 +354,257 @@ class StatController extends Controller
                 'end_at' => (int) $range->end_at,
                 'user_total' => (int) $range->user_total,
                 'note' => null,
+            ],
+        ];
+    }
+
+    public function getUserNodeTrafficSeries(Request $request)
+    {
+        $request->validate([
+            'user_id' => 'required|integer',
+            'granularity' => 'nullable|in:minute,hour,day',
+            'start_time' => 'nullable|integer|min:1000000000|max:9999999999',
+            'end_time' => 'nullable|integer|min:1000000000|max:9999999999',
+            'node_keys' => 'nullable|array',
+            'node_keys.*' => 'nullable|string|max:64',
+            'include_total' => 'nullable|boolean',
+        ]);
+
+        $userId = (int) $request->input('user_id');
+        $granularity = (string) ($request->input('granularity') ?: 'day');
+        $includeTotal = $request->boolean('include_total', true);
+        $nodeKeys = collect($request->input('node_keys', []))
+            ->map(function ($value) {
+                return trim((string) $value);
+            })
+            ->filter()
+            ->values();
+
+        if ($granularity === 'minute') {
+            $model = StatUserServerMinute::query();
+            $step = 60;
+            $format = 'H:i';
+            $endAt = strtotime(date('Y-m-d H:i:00', (int) $request->input('end_time', time())));
+            $startAt = $request->input('start_time')
+                ? strtotime(date('Y-m-d H:i:00', (int) $request->input('start_time')))
+                : $endAt - 59 * $step;
+            $maxRange = 24 * 3600;
+            $note = '分钟曲线从当前版本部署后开始统计。';
+        } elseif ($granularity === 'hour') {
+            $model = StatUserServerHour::query();
+            $step = 3600;
+            $format = 'm-d H:00';
+            $endAt = strtotime(date('Y-m-d H:00:00', (int) $request->input('end_time', time())));
+            $startAt = $request->input('start_time')
+                ? strtotime(date('Y-m-d H:00:00', (int) $request->input('start_time')))
+                : $endAt - 47 * $step;
+            $maxRange = 31 * 24 * 3600;
+            $note = '小时曲线从新版部署后开始统计。';
+        } else {
+            $model = StatUserServer::query();
+            $step = 86400;
+            $format = 'm-d';
+            $endAt = strtotime(date('Y-m-d', (int) $request->input('end_time', time())));
+            $startAt = $request->input('start_time')
+                ? strtotime(date('Y-m-d', (int) $request->input('start_time')))
+                : $endAt - 29 * $step;
+            $maxRange = 366 * 86400;
+            $note = null;
+        }
+
+        if ($startAt > $endAt) {
+            [$startAt, $endAt] = [$endAt, $startAt];
+        }
+        if (($endAt - $startAt) > $maxRange) {
+            $startAt = $endAt - $maxRange;
+        }
+
+        $baseQuery = $model
+            ->where('user_id', $userId)
+            ->where('record_at', '>=', $startAt)
+            ->where('record_at', '<=', $endAt);
+
+        $requestedNodePairs = $nodeKeys
+            ->map(function ($nodeKey) {
+                [$type, $id] = array_pad(explode(':', strtolower((string) $nodeKey), 2), 2, null);
+                $id = (int) $id;
+                if (!$type || $id <= 0) {
+                    return null;
+                }
+
+                return [
+                    'key' => $type . ':' . $id,
+                    'type' => $type,
+                    'id' => $id,
+                ];
+            })
+            ->filter()
+            ->values();
+
+        if ($requestedNodePairs->isNotEmpty()) {
+            $baseQuery->where(function ($query) use ($requestedNodePairs) {
+                foreach ($requestedNodePairs as $pair) {
+                    $query->orWhere(function ($subQuery) use ($pair) {
+                        $subQuery->where('server_type', $pair['type'])
+                            ->where('server_id', $pair['id']);
+                    });
+                }
+            });
+        }
+
+        $rows = $baseQuery
+            ->selectRaw('server_id, server_type, record_at, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
+            ->groupBy('server_id', 'server_type', 'record_at')
+            ->orderBy('record_at')
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return [
+                'data' => [
+                    'labels' => [],
+                    'series' => [],
+                ],
+                'meta' => [
+                    'granularity' => $granularity,
+                    'start_at' => $startAt,
+                    'end_at' => $endAt,
+                    'note' => $note ?: '暂无节点维度曲线数据。',
+                ],
+            ];
+        }
+
+        $availableKeys = $rows
+            ->map(function ($row) {
+                return $this->buildNodeRankKey($row->server_type ?? null, $row->server_id);
+            })
+            ->unique()
+            ->values();
+
+        $keysToRender = $requestedNodePairs->isNotEmpty()
+            ? $requestedNodePairs
+                ->pluck('key')
+                ->filter(function ($key) use ($availableKeys) {
+                    return $availableKeys->contains($key);
+                })
+                ->values()
+            : $availableKeys;
+
+        $renderRows = $rows->filter(function ($row) use ($keysToRender) {
+            return $keysToRender->contains($this->buildNodeRankKey($row->server_type ?? null, $row->server_id));
+        })->values();
+
+        $names = $this->resolveNodeRankNames($renderRows);
+        $protocols = $this->resolveNodeRankProtocols($renderRows);
+        $labels = [];
+        $buckets = [];
+
+        for ($cursor = $startAt; $cursor <= $endAt; $cursor += $step) {
+            $labels[] = [
+                'timestamp' => $cursor,
+                'label' => date($format, $cursor),
+            ];
+            $buckets[$cursor] = [
+                'timestamp' => $cursor,
+                'label' => date($format, $cursor),
+            ];
+        }
+
+        $seriesMap = [];
+        foreach ($keysToRender as $key) {
+            $seriesMap[$key] = [
+                'key' => $key,
+                'id' => (int) explode(':', $key, 2)[1],
+                'type' => (string) ($protocols[$key] ?? explode(':', $key, 2)[0]),
+                'name' => (string) ($names[$key] ?? ('Node ' . explode(':', $key, 2)[1])),
+                'points' => [],
+            ];
+        }
+
+        foreach ($labels as $labelMeta) {
+            foreach ($seriesMap as $key => $series) {
+                $seriesMap[$key]['points'][$labelMeta['timestamp']] = [
+                    'timestamp' => $labelMeta['timestamp'],
+                    'label' => $labelMeta['label'],
+                    'u' => 0,
+                    'd' => 0,
+                    'total' => 0,
+                ];
+            }
+        }
+
+        foreach ($renderRows as $row) {
+            $key = $this->buildNodeRankKey($row->server_type ?? null, $row->server_id);
+            $recordAt = (int) $row->record_at;
+            if (!isset($seriesMap[$key]['points'][$recordAt])) {
+                continue;
+            }
+
+            $u = (int) ($row->u ?? 0);
+            $d = (int) ($row->d ?? 0);
+            $seriesMap[$key]['points'][$recordAt] = [
+                'timestamp' => $recordAt,
+                'label' => $buckets[$recordAt]['label'] ?? date($format, $recordAt),
+                'u' => $u,
+                'd' => $d,
+                'total' => $u + $d,
+            ];
+        }
+
+        $series = collect($seriesMap)->map(function ($seriesItem) {
+            $points = collect($seriesItem['points'])->sortBy('timestamp')->values();
+            $total = (int) $points->sum('total');
+
+            return [
+                'key' => $seriesItem['key'],
+                'id' => $seriesItem['id'],
+                'type' => $seriesItem['type'],
+                'name' => $seriesItem['name'],
+                'total' => $total,
+                'points' => $points,
+            ];
+        })->values();
+
+        if ($includeTotal) {
+            $totalPoints = collect($labels)->map(function ($labelMeta) use ($series) {
+                $u = 0;
+                $d = 0;
+                foreach ($series as $item) {
+                    $point = collect($item['points'])->firstWhere('timestamp', $labelMeta['timestamp']);
+                    $u += (int) ($point['u'] ?? 0);
+                    $d += (int) ($point['d'] ?? 0);
+                }
+
+                return [
+                    'timestamp' => $labelMeta['timestamp'],
+                    'label' => $labelMeta['label'],
+                    'u' => $u,
+                    'd' => $d,
+                    'total' => $u + $d,
+                ];
+            })->values();
+
+            $series->prepend([
+                'key' => 'total',
+                'id' => 0,
+                'type' => 'all',
+                'name' => '全部节点',
+                'total' => (int) $totalPoints->sum('total'),
+                'points' => $totalPoints,
+            ]);
+        }
+
+        return [
+            'data' => [
+                'labels' => array_map(function ($item) {
+                    return $item['label'];
+                }, $labels),
+                'series' => $series->values(),
+            ],
+            'meta' => [
+                'granularity' => $granularity,
+                'start_at' => $startAt,
+                'end_at' => $endAt,
+                'note' => $note,
             ],
         ];
     }

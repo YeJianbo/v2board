@@ -11,12 +11,88 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class MachineController extends Controller
 {
     private const INSTALL_TOKEN_TTL_SECONDS = 604800;
     private const ONLINE_WINDOW_SECONDS = 180;
     private const RESTART_TOKEN_TTL_SECONDS = 300;
+
+    private function normalizeRelayRules($relayRules): array
+    {
+        if ($relayRules === null || $relayRules === '') {
+            return [];
+        }
+
+        if (!is_array($relayRules)) {
+            throw ValidationException::withMessages([
+                'relay_rules' => '转发规则格式不正确',
+            ]);
+        }
+
+        $normalizedRules = [];
+
+        foreach ($relayRules as $index => $rule) {
+            if (!is_array($rule)) {
+                throw ValidationException::withMessages([
+                    "relay_rules.{$index}" => '转发规则必须是对象',
+                ]);
+            }
+
+            $listenHost = trim((string) ($rule['listen_host'] ?? '0.0.0.0'));
+            $targetHost = trim((string) ($rule['target_host'] ?? ''));
+            $remark = trim((string) ($rule['remark'] ?? ($rule['name'] ?? '')));
+            $listenPort = (int) ($rule['listen_port'] ?? 0);
+            $targetPort = (int) ($rule['target_port'] ?? 0);
+            $protocols = is_array($rule['protocols'] ?? null) ? $rule['protocols'] : [];
+
+            $protocols = array_values(array_unique(array_filter(array_map(function ($protocol) {
+                return strtolower(trim((string) $protocol));
+            }, $protocols), function ($protocol) {
+                return in_array($protocol, ['tcp', 'udp'], true);
+            })));
+
+            if ($listenHost === '') {
+                $listenHost = '0.0.0.0';
+            }
+
+            if ($targetHost === '') {
+                throw ValidationException::withMessages([
+                    "relay_rules.{$index}.target_host" => '转发目标地址不能为空',
+                ]);
+            }
+
+            if ($listenPort < 1 || $listenPort > 65535) {
+                throw ValidationException::withMessages([
+                    "relay_rules.{$index}.listen_port" => '监听端口必须在 1-65535 之间',
+                ]);
+            }
+
+            if ($targetPort < 1 || $targetPort > 65535) {
+                throw ValidationException::withMessages([
+                    "relay_rules.{$index}.target_port" => '目标端口必须在 1-65535 之间',
+                ]);
+            }
+
+            if (!$protocols) {
+                throw ValidationException::withMessages([
+                    "relay_rules.{$index}.protocols" => '至少选择一个传输协议',
+                ]);
+            }
+
+            $normalizedRules[] = [
+                'listen_host' => $listenHost,
+                'listen_port' => $listenPort,
+                'target_host' => $targetHost,
+                'target_port' => $targetPort,
+                'protocols' => $protocols,
+                'remark' => $remark,
+            ];
+        }
+
+        return $normalizedRules;
+    }
 
     public function fetch(Request $request)
     {
@@ -59,6 +135,7 @@ class MachineController extends Controller
                     'ddns_last_synced_ip' => $ddnsLastSyncedIp,
                     'ddns_last_synced_at' => $ddnsLastSyncedAt,
                     'ddns_error' => $ddnsError,
+                    'relay_rules' => $machine->relay_rules ?: [],
                     'is_online' => $isOnline ? 1 : 0,
                     'last_seen_at' => $lastSeenAt,
                     'created_at' => $machine->created_at,
@@ -196,6 +273,7 @@ class MachineController extends Controller
             'ddns_ttl' => 'nullable|integer|min:120|max:86400',
             'ddns_proxied' => 'nullable|boolean',
             'ddns_api_token' => 'nullable|string|max:4096',
+            'relay_rules' => 'nullable|array',
         ]);
 
         $params['host'] = trim((string) ($params['host'] ?? ''));
@@ -206,6 +284,7 @@ class MachineController extends Controller
         $params['ddns_record_type'] = strtoupper((string) ($params['ddns_record_type'] ?? 'A')) ?: 'A';
         $params['ddns_ttl'] = (int) ($params['ddns_ttl'] ?? 120);
         $params['ddns_proxied'] = (int) ($request->boolean('ddns_proxied'));
+        $params['relay_rules'] = $this->normalizeRelayRules($request->input('relay_rules', []));
         $incomingDdnsApiToken = trim((string) ($params['ddns_api_token'] ?? ''));
         unset($params['ddns_api_token']);
 
@@ -253,6 +332,7 @@ class MachineController extends Controller
     {
         $params = $request->validate([
             'machine_id' => 'required|integer|exists:v2_machine,id',
+            'relay_machine_id' => 'nullable|integer|exists:v2_machine,id',
             'name' => 'required|string',
             'host' => 'nullable|string',
             'port' => 'nullable|integer|min:1|max:65535',
@@ -293,13 +373,16 @@ class MachineController extends Controller
             'name' => $params['name'],
             'parent_id' => null,
             'machine_id' => $machine->id,
+            'relay_machine_id' => !empty($params['relay_machine_id']) && (int) $params['relay_machine_id'] !== (int) $machine->id
+                ? (int) $params['relay_machine_id']
+                : null,
             'host' => $params['host'] ?? $machine->host ?: '127.0.0.1',
             'listen_ip' => '0.0.0.0',
             'port' => $port,
             'server_port' => $serverPort,
             'tags' => [],
             'rate' => $params['rate'] ?? 1,
-            'show' => $params['show'] ?? 0,
+            'show' => $params['show'] ?? 1,
             'sort' => null,
             'protocol' => $protocol,
             'tls' => $params['tls'] ?? ($protocol === 'anytls' ? 1 : 0),
@@ -322,11 +405,15 @@ class MachineController extends Controller
         ]);
 
         $this->notifyMachineNodeSetChanged((int) $machine->id);
+        if (!empty($server->relay_machine_id)) {
+            $this->notifyMachineNodeSetChanged((int) $server->relay_machine_id, false);
+        }
 
         return response([
             'data' => [
                 'id' => $server->id,
                 'machine_id' => $machine->id,
+                'relay_machine_id' => (int) ($server->relay_machine_id ?: 0),
             ],
         ]);
     }

@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 class V2nodeController extends Controller
 {
     private const RESTART_TOKEN_TTL_SECONDS = 300;
+    private const DEFAULT_TLS_SERVER_NAME = 'genshin.hoyoverse.com';
 
     private function notifyMachineNodesChanged(array $machineIds): void
     {
@@ -37,6 +38,7 @@ class V2nodeController extends Controller
             'name' => 'required',
             'parent_id' => 'nullable|integer',
             'machine_id' => 'nullable|integer|exists:v2_machine,id',
+            'relay_machine_id' => 'nullable|integer|exists:v2_machine,id',
             'host' => 'required',
             'listen_ip' => 'nullable',
             'port' => 'required',
@@ -67,26 +69,29 @@ class V2nodeController extends Controller
         if ($params['protocol'] == 'anytls' && (int) $params['tls'] === 0) {
             $params['tls'] = 1;
         }
-        if ($params['protocol'] == 'anytls') {
-            $params['tls_settings'] = $this->normalizeAnyTlsSettings($params['tls_settings'] ?? []);
-        }
         if (in_array($params['protocol'], ['hysteria2', 'trojan', 'tuic'])) {
             $params['tls'] = 1;
         }
+        $params['tls_settings'] = $this->normalizeTlsSettingsForProtocol(
+            $params['protocol'],
+            $params['tls_settings'] ?? [],
+            (int) ($params['tls'] ?? 0)
+        );
         if (isset($params['tls']) && (int)$params['tls'] === 2) {
             $keyPair = SodiumCompat::crypto_box_keypair();
-            $params['tls_settings'] = $params['tls_settings'] ?? [];
-            if (!isset($params['tls_settings']['public_key'])) {
+            if (empty($params['tls_settings']['public_key'])) {
                 $params['tls_settings']['public_key'] = Helper::base64EncodeUrlSafe(SodiumCompat::crypto_box_publickey($keyPair));
             }
-            if (!isset($params['tls_settings']['private_key'])) {
+            if (empty($params['tls_settings']['private_key'])) {
                 $params['tls_settings']['private_key'] = Helper::base64EncodeUrlSafe(SodiumCompat::crypto_box_secretkey($keyPair));
             }
-            if (!isset($params['tls_settings']['short_id'])) {
+            if (empty($params['tls_settings']['short_id'])) {
                 $params['tls_settings']['short_id'] = substr(sha1($params['tls_settings']['private_key']), 0, 8);
             }
-            if (!isset($params['tls_settings']['server_port'])) {
+            if (empty($params['tls_settings']['server_port'])) {
                 $params['tls_settings']['server_port'] = "443";
+            } else {
+                $params['tls_settings']['server_port'] = (string) $params['tls_settings']['server_port'];
             }
         }
         if (isset($params['tls_settings']) && !empty($params['tls_settings']['ech']) && $params['tls_settings']['ech'] === 'custom') {
@@ -163,10 +168,10 @@ class V2nodeController extends Controller
                 $params['encryption_settings']['rtt'] = '0rtt';
                 $params['encryption_settings']['ticket'] = '600s';
             }
-            if (!isset($params['encryption_settings']['private_key'])) {
+            if (empty($params['encryption_settings']['private_key'])) {
                 $params['encryption_settings']['private_key'] = Helper::base64EncodeUrlSafe(SodiumCompat::crypto_box_secretkey($keyPair));
             }
-            if (!isset($params['encryption_settings']['password'])) {
+            if (empty($params['encryption_settings']['password'])) {
                 $params['encryption_settings']['password'] = Helper::base64EncodeUrlSafe(SodiumCompat::crypto_box_publickey($keyPair));
             }
         }
@@ -191,6 +196,20 @@ class V2nodeController extends Controller
         if($params['protocol'] == 'shadowsocks' && !isset($params['cipher'])) {
             $params['cipher'] = 'aes-128-gcm';
         }
+        if (array_key_exists('machine_id', $params)) {
+            $params['machine_id'] = !empty($params['machine_id']) ? (int) $params['machine_id'] : null;
+        }
+        if (array_key_exists('relay_machine_id', $params)) {
+            $params['relay_machine_id'] = !empty($params['relay_machine_id']) ? (int) $params['relay_machine_id'] : null;
+        }
+        $inputMachineId = array_key_exists('machine_id', $params) ? (int) ($params['machine_id'] ?: 0) : 0;
+        if (
+            !empty($params['relay_machine_id']) &&
+            $inputMachineId > 0 &&
+            (int) $params['relay_machine_id'] === $inputMachineId
+        ) {
+            $params['relay_machine_id'] = null;
+        }
 
         if ($request->input('id')) {
             $server = ServerV2node::find($request->input('id'));
@@ -207,6 +226,7 @@ class V2nodeController extends Controller
             $this->notifyMachineNodesChanged([
                 $originalMachineId,
                 (int) ($server->machine_id ?: 0),
+                (int) ($server->relay_machine_id ?: 0),
             ]);
             return response([
                 'data' => true
@@ -220,19 +240,34 @@ class V2nodeController extends Controller
 
         $this->notifyMachineNodesChanged([
             (int) ($server->machine_id ?: 0),
+            (int) ($server->relay_machine_id ?: 0),
         ]);
         return response([
             'data' => true
         ]);
     }
 
-    private function normalizeAnyTlsSettings(array $settings): array
+    private function normalizeTlsSettingsForProtocol(string $protocol, array $settings, int $tlsMode = 0): array
     {
-        if (empty($settings['server_name'])) {
-            $settings['server_name'] = 'genshin.hoyoverse.com';
+        if (!in_array($protocol, ['anytls', 'hysteria2', 'trojan', 'tuic', 'vless', 'vmess'], true)) {
+            return $settings;
         }
 
-        if (array_key_exists('server_port', $settings) && $settings['server_port'] !== null && $settings['server_port'] !== '') {
+        if (($tlsMode === 1 || $tlsMode === 2) && empty($settings['server_name'])) {
+            $settings['server_name'] = self::DEFAULT_TLS_SERVER_NAME;
+        }
+
+        if (
+            $tlsMode === 1 &&
+            isset($settings['cert_mode']) &&
+            strtolower((string) $settings['cert_mode']) === 'self'
+        ) {
+            $settings['allow_insecure'] = 1;
+        }
+
+        if ($tlsMode === 2 && empty($settings['server_port'])) {
+            $settings['server_port'] = "443";
+        } elseif (array_key_exists('server_port', $settings) && $settings['server_port'] !== null && $settings['server_port'] !== '') {
             $settings['server_port'] = (string) $settings['server_port'];
         }
 
@@ -248,8 +283,9 @@ class V2nodeController extends Controller
             }
         }
         $machineId = (int) ($server->machine_id ?: 0);
+        $relayMachineId = (int) ($server->relay_machine_id ?: 0);
         $result = $server->delete();
-        $this->notifyMachineNodesChanged([$machineId]);
+        $this->notifyMachineNodesChanged([$machineId, $relayMachineId]);
         return response([
             'data' => $result
         ]);
@@ -260,6 +296,7 @@ class V2nodeController extends Controller
         $params = $request->validate([
             'show' => 'nullable|in:0,1',
             'machine_id' => 'nullable|integer|exists:v2_machine,id',
+            'relay_machine_id' => 'nullable|integer|exists:v2_machine,id',
         ]);
 
         $server = ServerV2node::find($request->input('id'));
@@ -268,6 +305,22 @@ class V2nodeController extends Controller
             abort(500, '该服务器不存在');
         }
         $originalMachineId = (int) ($server->machine_id ?: 0);
+        if (array_key_exists('machine_id', $params)) {
+            $params['machine_id'] = !empty($params['machine_id']) ? (int) $params['machine_id'] : null;
+        }
+        if (array_key_exists('relay_machine_id', $params)) {
+            $params['relay_machine_id'] = !empty($params['relay_machine_id']) ? (int) $params['relay_machine_id'] : null;
+        }
+        $nextMachineId = array_key_exists('machine_id', $params)
+            ? (int) ($params['machine_id'] ?: 0)
+            : $originalMachineId;
+        if (
+            !empty($params['relay_machine_id']) &&
+            $nextMachineId > 0 &&
+            (int) $params['relay_machine_id'] === $nextMachineId
+        ) {
+            $params['relay_machine_id'] = null;
+        }
         try {
             $server->update($params);
         } catch (\Exception $e) {
@@ -276,6 +329,7 @@ class V2nodeController extends Controller
         $this->notifyMachineNodesChanged([
             $originalMachineId,
             (int) ($server->machine_id ?: 0),
+            (int) ($server->relay_machine_id ?: 0),
         ]);
         return response([
             'data' => true
@@ -296,6 +350,7 @@ class V2nodeController extends Controller
 
         $this->notifyMachineNodesChanged([
             (int) ($copiedServer->machine_id ?: 0),
+            (int) ($copiedServer->relay_machine_id ?: 0),
         ]);
 
         return response([

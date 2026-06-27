@@ -14,6 +14,7 @@ use App\Models\ServerV2node;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
 class MachineController extends Controller
@@ -39,7 +40,6 @@ class MachineController extends Controller
     {
         $signedMachine = $this->authenticateSignedRequest($request);
         if ($signedMachine) {
-            $this->enforceIpWhitelist($request, $signedMachine);
             return $signedMachine;
         }
 
@@ -209,12 +209,35 @@ class MachineController extends Controller
         return $reportedIp !== '' ? $reportedIp : $remoteIp;
     }
 
+    private function resolveMachineConnectHost(Machine $machine, ?array $status = null): string
+    {
+        $status = $status ?? $this->decodeMachineStatus($machine);
+        $ddnsHost = $this->resolveDdnsHost($machine);
+        $reportedIp = trim((string) ($status['primary_ip'] ?? $status['remote_ip'] ?? $status['ip'] ?? ''));
+        $configuredHost = trim((string) $machine->host);
+
+        if ($ddnsHost !== '') {
+            return $ddnsHost;
+        }
+
+        if ($reportedIp !== '' && !$this->isPrivateIp($reportedIp)) {
+            return $reportedIp;
+        }
+
+        if ($configuredHost !== '' && !$this->isPrivateIp($configuredHost)) {
+            return $configuredHost;
+        }
+
+        return $reportedIp !== '' ? $reportedIp : $configuredHost;
+    }
+
     private function touchMachineHeartbeat(Machine $machine, Request $request, array $extraStatus = []): void
     {
         $status = $this->decodeMachineStatus($machine);
         $remoteIp = $this->resolveRequestRemoteIp($request);
         $reportedIp = trim((string) ($extraStatus['ip'] ?? ($status['ip'] ?? '')));
         $primaryIp = $this->resolvePrimaryIp($reportedIp, $remoteIp);
+        $previousPrimaryIp = trim((string) ($status['primary_ip'] ?? ''));
 
         if ($remoteIp !== '') {
             $status['remote_ip'] = $remoteIp;
@@ -225,13 +248,242 @@ class MachineController extends Controller
         $status['reported_at'] = time();
 
         foreach ($extraStatus as $key => $value) {
-            if ($value !== null && $value !== '') {
-                $status[$key] = $value;
+            if ($value === null || $value === '') {
+                unset($status[$key]);
+                continue;
+            }
+
+            $status[$key] = $value;
+        }
+
+        if ($primaryIp !== '' && (!$this->isPrivateIp($primaryIp))) {
+            if ($primaryIp !== $previousPrimaryIp || empty($status['country_code']) || empty($status['country'])) {
+                $geo = $this->resolveGeoByIp($primaryIp);
+                if (!empty($geo['country_code'])) {
+                    $status['country_code'] = $geo['country_code'];
+                }
+                if (!empty($geo['country'])) {
+                    $status['country'] = $geo['country'];
+                }
             }
         }
 
         $machine->status = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $machine->save();
+    }
+
+    private function resolveGeoByIp(string $ip): array
+    {
+        $ip = trim($ip);
+        if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP) || $this->isPrivateIp($ip)) {
+            return [];
+        }
+
+        return Cache::remember('machine_geo:' . $ip, 86400, function () use ($ip) {
+            try {
+                $response = Http::timeout(3)
+                    ->acceptJson()
+                    ->get('http://ip-api.com/json/' . $ip, [
+                        'fields' => 'status,country,countryCode',
+                    ]);
+
+                if (!$response->successful()) {
+                    return [];
+                }
+
+                $payload = $response->json();
+                if (!is_array($payload) || ($payload['status'] ?? '') !== 'success') {
+                    return [];
+                }
+
+                return [
+                    'country_code' => strtoupper((string) ($payload['countryCode'] ?? '')),
+                    'country' => (string) ($payload['country'] ?? ''),
+                ];
+            } catch (\Throwable $e) {
+                return [];
+            }
+        });
+    }
+
+    private function resolveDdnsHost(Machine $machine): string
+    {
+        $recordName = trim((string) $machine->ddns_record_name);
+        $zoneName = trim((string) $machine->ddns_zone_name);
+
+        if ($recordName === '') {
+            return '';
+        }
+
+        if ($recordName === '@') {
+            return $zoneName;
+        }
+
+        if ($zoneName !== '' && preg_match('/(^|\.)' . preg_quote($zoneName, '/') . '$/i', $recordName)) {
+            return $recordName;
+        }
+
+        return $zoneName !== '' ? "{$recordName}.{$zoneName}" : $recordName;
+    }
+
+    private function decryptMachineDdnsApiToken(Machine $machine): string
+    {
+        $value = trim((string) $machine->ddns_api_token);
+        if ($value === '') {
+            return '';
+        }
+
+        try {
+            return (string) decrypt($value);
+        } catch (\Throwable $e) {
+            return preg_match('/^[A-Za-z0-9._-]{20,}$/', $value) ? $value : '';
+        }
+    }
+
+    private function resolveV2nodeFirewallProtocols(ServerV2node $server): array
+    {
+        $protocol = strtolower(trim((string) $server->protocol));
+        $network = strtolower(trim((string) $server->network));
+
+        if (in_array($protocol, ['hysteria2', 'tuic'], true)) {
+            return ['udp'];
+        }
+
+        if ($protocol === 'shadowsocks') {
+            $networkSettings = is_array($server->network_settings) ? $server->network_settings : [];
+            $hasHttpObfs = !empty($networkSettings['path']) || !empty($networkSettings['host']);
+
+            return $hasHttpObfs ? ['tcp'] : ['tcp', 'udp'];
+        }
+
+        if (in_array($network, ['udp', 'quic', 'kcp', 'mkcp'], true)) {
+            return ['udp'];
+        }
+
+        return ['tcp'];
+    }
+
+    private function buildProbeRelayRules(Machine $machine): array
+    {
+        $servers = ServerV2node::query()
+            ->where('relay_machine_id', $machine->id)
+            ->where('machine_id', '!=', $machine->id)
+            ->orderBy('sort', 'ASC')
+            ->orderBy('id', 'ASC')
+            ->get();
+
+        if ($servers->isEmpty()) {
+            return [];
+        }
+
+        $targetMachineIds = $servers->pluck('machine_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $targetMachines = Machine::query()
+            ->whereIn('id', $targetMachineIds)
+            ->get()
+            ->keyBy('id');
+
+        return $servers->map(function (ServerV2node $server) use ($targetMachines) {
+            $targetMachine = $targetMachines->get((int) $server->machine_id);
+            if (!$targetMachine) {
+                return null;
+            }
+
+            $listenPort = (int) $server->port;
+            if ($listenPort < 1 || $listenPort > 65535) {
+                $listenPort = (int) $server->server_port;
+            }
+            $targetPort = (int) $server->server_port;
+            if ($listenPort < 1 || $listenPort > 65535 || $targetPort < 1 || $targetPort > 65535) {
+                return null;
+            }
+
+            $targetHost = $this->resolveMachineConnectHost($targetMachine);
+            if ($targetHost === '') {
+                return null;
+            }
+
+            return [
+                'node_id' => (int) $server->id,
+                'name' => (string) $server->name,
+                'protocol' => strtolower(trim((string) $server->protocol)),
+                'listen_host' => '0.0.0.0',
+                'listen_port' => $listenPort,
+                'target_host' => $targetHost,
+                'target_port' => $targetPort,
+                'protocols' => $this->resolveV2nodeFirewallProtocols($server),
+            ];
+        })->filter()->values()->all();
+    }
+
+    private function buildMachineRelayRules(Machine $machine): array
+    {
+        $relayRules = is_array($machine->relay_rules) ? $machine->relay_rules : [];
+
+        return collect($relayRules)
+            ->map(function ($rule, $index) {
+                if (!is_array($rule)) {
+                    return null;
+                }
+
+                $listenHost = trim((string) ($rule['listen_host'] ?? '0.0.0.0'));
+                $targetHost = trim((string) ($rule['target_host'] ?? ''));
+                $listenPort = (int) ($rule['listen_port'] ?? 0);
+                $targetPort = (int) ($rule['target_port'] ?? 0);
+                $protocols = is_array($rule['protocols'] ?? null) ? $rule['protocols'] : [];
+                $protocols = array_values(array_unique(array_filter(array_map(function ($protocol) {
+                    return strtolower(trim((string) $protocol));
+                }, $protocols), function ($protocol) {
+                    return in_array($protocol, ['tcp', 'udp'], true);
+                })));
+
+                if ($targetHost === '' || $listenPort < 1 || $listenPort > 65535 || $targetPort < 1 || $targetPort > 65535 || !$protocols) {
+                    return null;
+                }
+
+                return [
+                    'name' => trim((string) ($rule['remark'] ?? '')) ?: ('relay-' . ($index + 1)),
+                    'listen_host' => $listenHost !== '' ? $listenHost : '0.0.0.0',
+                    'listen_port' => $listenPort,
+                    'target_host' => $targetHost,
+                    'target_port' => $targetPort,
+                    'protocols' => $protocols,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function buildProbeFirewallRules(Machine $machine): array
+    {
+        return ServerV2node::query()
+            ->where('machine_id', $machine->id)
+            ->orderBy('sort', 'ASC')
+            ->orderBy('id', 'ASC')
+            ->get()
+            ->map(function (ServerV2node $server) {
+                $port = (int) $server->server_port;
+                if ($port < 1 || $port > 65535) {
+                    return null;
+                }
+
+                return [
+                    'node_id' => (int) $server->id,
+                    'name' => (string) $server->name,
+                    'port' => $port,
+                    'protocol' => strtolower(trim((string) $server->protocol)),
+                    'protocols' => $this->resolveV2nodeFirewallProtocols($server),
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
     }
 
     public function config(Request $request)
@@ -319,7 +571,11 @@ class MachineController extends Controller
             'remote_ip' => $remoteIp,
             'primary_ip' => $this->resolvePrimaryIp($reportedIp, $remoteIp),
             'reported_at' => time(),
-            'version' => $data['version'] ?? 'unknown'
+            'version' => $data['version'] ?? 'unknown',
+            'ddns_host' => trim((string) ($data['ddns_host'] ?? '')),
+            'ddns_synced_ip' => trim((string) ($data['ddns_synced_ip'] ?? '')),
+            'ddns_synced_at' => !empty($data['ddns_synced_at']) ? (int) $data['ddns_synced_at'] : null,
+            'ddns_error' => array_key_exists('ddns_error', $data) ? trim((string) $data['ddns_error']) : null,
         ];
         
         $this->touchMachineHeartbeat($machine, $request, $status);
@@ -381,6 +637,7 @@ class MachineController extends Controller
     {
         $machine = $this->authenticate($request);
         $this->touchMachineHeartbeat($machine, $request);
+        $status = $this->decodeMachineStatus($machine);
 
         $apiHost = rtrim((string) (
             $this->panelSetting('server_api_url')
@@ -409,10 +666,35 @@ class MachineController extends Controller
             ->values();
 
         $restartToken = Cache::get('v2node_probe_restart:' . $machine->id);
+        $ddnsHost = $this->resolveDdnsHost($machine);
+        $currentIp = trim((string) ($status['primary_ip'] ?? $status['remote_ip'] ?? $status['ip'] ?? ''));
 
         return response()->json([
             'data' => $nodes,
             'restart_v2node_token' => $restartToken ?: '',
+            'probe' => [
+                'firewall_rules' => $this->buildProbeFirewallRules($machine),
+                'relay' => [
+                    'rules' => array_values(array_merge(
+                        $this->buildMachineRelayRules($machine),
+                        $this->buildProbeRelayRules($machine)
+                    )),
+                ],
+                'ddns' => [
+                    'enabled' => (bool) $machine->ddns_enabled,
+                    'provider' => (string) ($machine->ddns_provider ?: 'cloudflare'),
+                    'zone_name' => (string) ($machine->ddns_zone_name ?: ''),
+                    'record_name' => (string) ($machine->ddns_record_name ?: ''),
+                    'host' => $ddnsHost,
+                    'record_type' => strtoupper((string) ($machine->ddns_record_type ?: 'A')),
+                    'ttl' => (int) ($machine->ddns_ttl ?: 120),
+                    'proxied' => (bool) $machine->ddns_proxied,
+                    'api_token' => $this->decryptMachineDdnsApiToken($machine),
+                    'current_ip' => $currentIp,
+                    'last_synced_ip' => trim((string) ($status['ddns_synced_ip'] ?? '')),
+                    'last_synced_at' => !empty($status['ddns_synced_at']) ? (int) $status['ddns_synced_at'] : 0,
+                ],
+            ],
         ]);
     }
 
