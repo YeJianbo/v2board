@@ -106,7 +106,7 @@
     }
     table.bc-node-traffic-legacy-table th:nth-child(3) .n-data-table-th__title,
     table.bc-node-traffic-legacy-table td:nth-child(3) .n-data-table-td__content {
-      min-width: 84px;
+      min-width: 72px;
     }
     .bc-node-traffic-empty {
       color: var(--bc-text-soft);
@@ -116,27 +116,28 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 48px;
-      height: 24px;
-      padding: 0 10px;
-      border: 1px solid rgba(31, 34, 37, .12);
-      border-radius: 999px;
+      min-width: 42px;
+      height: 22px;
+      padding: 0 8px;
+      border: 1px solid rgba(31, 34, 37, .14);
+      border-radius: 4px;
       background: #fff;
       color: var(--bc-text);
       font-size: 12px;
-      line-height: 22px;
+      line-height: 20px;
       white-space: nowrap;
-      box-shadow: 0 1px 1px rgba(31, 34, 37, .02);
+      box-shadow: none;
     }
     .bc-node-traffic-pill--protocol {
       color: var(--bc-primary);
-      border-color: var(--bc-primary-border);
-      background: rgba(24, 160, 88, .04);
+      border-color: rgba(24, 160, 88, .34);
+      background: rgba(24, 160, 88, .035);
+      font-weight: 500;
     }
     .bc-node-traffic-pill--rate {
-      min-width: 60px;
+      min-width: 54px;
       color: var(--bc-text);
-      border-color: rgba(31, 34, 37, .13);
+      border-color: rgba(31, 34, 37, .16);
       background: #fff;
     }
     .bc-node-traffic-pagination {
