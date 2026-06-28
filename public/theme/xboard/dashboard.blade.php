@@ -171,7 +171,6 @@
       var activeHost = null
       var insertMenuTimer = 0
       var subscribeDataPromise = null
-      var nodeTrafficHash = '#/node-traffic-detail'
       var titleCandidates = [
         '仪表盘',
         '使用文档',
@@ -214,10 +213,6 @@
       }
 
       function openNodeTraffic() {
-        if (window.location.hash !== nodeTrafficHash) {
-          window.location.hash = nodeTrafficHash
-          return
-        }
         renderFrame()
       }
 
@@ -568,11 +563,7 @@
         setTopTitleActive(false)
       }
 
-      function handleHashChange() {
-        if (window.location.hash === nodeTrafficHash) {
-          renderFrame()
-          return
-        }
+      function handleRouteChange() {
         closeNodeTraffic()
       }
 
@@ -648,7 +639,7 @@
 
       var observer = new MutationObserver(schedulePatch)
       observer.observe(document.documentElement, { childList: true, subtree: true })
-      window.addEventListener('hashchange', handleHashChange)
+      window.addEventListener('hashchange', handleRouteChange)
       window.addEventListener('resize', updateFrameLayout)
       window.addEventListener('message', function (event) {
         if (event.origin !== window.location.origin) return
@@ -658,7 +649,6 @@
       window.addEventListener('load', schedulePatch)
       setTimeout(schedulePatch, 800)
       setTimeout(schedulePatch, 2000)
-      if (window.location.hash === nodeTrafficHash) setTimeout(renderFrame, 900)
     })()
   </script>
   {!! $theme_config['custom_html'] !!}
