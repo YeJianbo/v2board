@@ -35,6 +35,187 @@
   </script>
   <div id="app"></div>
   <style>
+    html.bc-user-polish {
+      --bc-bg: #f5f3ef;
+      --bc-bg-soft: #f8f7f3;
+      --bc-panel: #fbfaf6;
+      --bc-panel-soft: #f8f7f3;
+      --bc-line: rgba(42, 37, 32, .08);
+      --bc-line-strong: rgba(42, 37, 32, .14);
+      --bc-text: #2a2520;
+      --bc-text-soft: #7a7470;
+      --bc-primary: #c94f2e;
+      --bc-primary-strong: #a83d20;
+      --bc-primary-soft: rgba(201, 79, 46, .08);
+      --bc-primary-border: rgba(201, 79, 46, .22);
+      --bc-shadow-xs: 0 1px 2px rgba(42, 37, 32, .04);
+      --bc-shadow-sm: 0 1px 3px rgba(42, 37, 32, .04), 0 4px 12px rgba(42, 37, 32, .03);
+      --bc-shadow-md: 0 4px 16px rgba(42, 37, 32, .06), 0 12px 32px rgba(42, 37, 32, .04);
+      color-scheme: light;
+    }
+    html.bc-user-polish,
+    html.bc-user-polish body,
+    html.bc-user-polish #app {
+      min-height: 100%;
+      background: var(--bc-bg) !important;
+      color: var(--bc-text) !important;
+      font-family: Inter, "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    html.bc-user-polish body {
+      margin: 0;
+      line-height: 1.75;
+    }
+    html.bc-user-polish .n-config-provider,
+    html.bc-user-polish .n-layout,
+    html.bc-user-polish .n-layout-scroll-container,
+    html.bc-user-polish .n-layout-content,
+    html.bc-user-polish main,
+    html.bc-user-polish [class*="page"],
+    html.bc-user-polish [class*="dashboard"] {
+      background: var(--bc-bg) !important;
+      color: var(--bc-text) !important;
+    }
+    html.bc-user-polish .n-layout-sider,
+    html.bc-user-polish aside,
+    html.bc-user-polish nav {
+      background: var(--bc-bg-soft) !important;
+      border-color: var(--bc-line) !important;
+      box-shadow: var(--bc-shadow-xs) !important;
+    }
+    html.bc-user-polish header,
+    html.bc-user-polish .n-layout-header {
+      background: rgba(251, 250, 246, .9) !important;
+      border-color: var(--bc-line) !important;
+      box-shadow: none !important;
+      backdrop-filter: blur(12px);
+    }
+    html.bc-user-polish .n-card {
+      overflow: hidden;
+      background: var(--bc-panel) !important;
+      border: 1px solid var(--bc-line) !important;
+      border-radius: 8px !important;
+      box-shadow: var(--bc-shadow-sm) !important;
+    }
+    html.bc-user-polish .n-card:hover {
+      border-color: var(--bc-line-strong) !important;
+      box-shadow: var(--bc-shadow-md) !important;
+    }
+    html.bc-user-polish .n-card-header,
+    html.bc-user-polish .n-card__header {
+      color: var(--bc-text) !important;
+      font-weight: 650 !important;
+    }
+    html.bc-user-polish .n-card__content,
+    html.bc-user-polish .n-card__footer {
+      color: var(--bc-text) !important;
+    }
+    html.bc-user-polish .n-menu {
+      --n-item-color-hover: var(--bc-primary-soft) !important;
+      --n-item-color-active: var(--bc-primary-soft) !important;
+      --n-item-color-active-hover: rgba(201, 79, 46, .12) !important;
+      --n-item-text-color-hover: var(--bc-primary-strong) !important;
+      --n-item-text-color-active: var(--bc-primary-strong) !important;
+      --n-item-icon-color-hover: var(--bc-primary-strong) !important;
+      --n-item-icon-color-active: var(--bc-primary-strong) !important;
+      --n-item-border-radius: 8px !important;
+    }
+    html.bc-user-polish .n-menu-item-content {
+      margin: 2px 8px !important;
+      border-radius: 8px !important;
+      color: var(--bc-text-soft) !important;
+      transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+    }
+    html.bc-user-polish .n-menu-item-content:hover,
+    html.bc-user-polish .n-menu-item-content--selected {
+      background: var(--bc-primary-soft) !important;
+      color: var(--bc-primary-strong) !important;
+      box-shadow: inset 3px 0 0 0 var(--bc-primary);
+    }
+    html.bc-user-polish .n-button {
+      --n-border-radius: 8px !important;
+      border-radius: 8px !important;
+      font-weight: 600 !important;
+      box-shadow: none !important;
+    }
+    html.bc-user-polish .n-button--primary-type {
+      --n-color: var(--bc-primary) !important;
+      --n-color-hover: var(--bc-primary-strong) !important;
+      --n-color-pressed: #8f321b !important;
+      --n-color-focus: var(--bc-primary-strong) !important;
+      --n-border: 1px solid var(--bc-primary) !important;
+      --n-border-hover: 1px solid var(--bc-primary-strong) !important;
+      --n-border-pressed: 1px solid #8f321b !important;
+      --n-border-focus: 1px solid var(--bc-primary-strong) !important;
+      --n-ripple-color: var(--bc-primary) !important;
+    }
+    html.bc-user-polish .n-button--tertiary-type,
+    html.bc-user-polish .n-button--default-type {
+      --n-color-hover: var(--bc-primary-soft) !important;
+      --n-color-pressed: rgba(201, 79, 46, .12) !important;
+      --n-text-color-hover: var(--bc-primary-strong) !important;
+      --n-text-color-pressed: var(--bc-primary-strong) !important;
+      --n-border-hover: 1px solid var(--bc-primary-border) !important;
+      --n-border-pressed: 1px solid var(--bc-primary-border) !important;
+    }
+    html.bc-user-polish .n-input,
+    html.bc-user-polish .n-input-wrapper,
+    html.bc-user-polish .n-base-selection,
+    html.bc-user-polish .n-date-picker,
+    html.bc-user-polish .n-input-number {
+      --n-border-radius: 8px !important;
+      --n-border-hover: 1px solid var(--bc-primary-border) !important;
+      --n-border-focus: 1px solid var(--bc-primary) !important;
+      --n-box-shadow-focus: 0 0 0 2px rgba(201, 79, 46, .12) !important;
+      background-color: var(--bc-panel) !important;
+    }
+    html.bc-user-polish .n-data-table,
+    html.bc-user-polish .n-data-table-table,
+    html.bc-user-polish table {
+      --n-border-radius: 8px !important;
+      --n-th-color: var(--bc-bg-soft) !important;
+      --n-td-color-hover: rgba(42, 37, 32, .025) !important;
+      --n-border-color: var(--bc-line) !important;
+      background: var(--bc-panel) !important;
+      border-radius: 8px !important;
+    }
+    html.bc-user-polish th {
+      background: var(--bc-bg-soft) !important;
+      color: var(--bc-text) !important;
+      font-weight: 650 !important;
+    }
+    html.bc-user-polish td {
+      border-color: var(--bc-line) !important;
+    }
+    html.bc-user-polish .n-tag {
+      --n-border-radius: 999px !important;
+      border-radius: 999px !important;
+    }
+    html.bc-user-polish .n-modal,
+    html.bc-user-polish .n-dialog,
+    html.bc-user-polish .n-drawer,
+    html.bc-user-polish .n-popover {
+      border-radius: 8px !important;
+      background: var(--bc-panel) !important;
+      border: 1px solid var(--bc-line) !important;
+      box-shadow: var(--bc-shadow-md) !important;
+    }
+    html.bc-user-polish .n-tabs-tab.n-tabs-tab--active,
+    html.bc-user-polish .n-tabs-tab:hover {
+      color: var(--bc-primary-strong) !important;
+    }
+    html.bc-user-polish .n-tabs-bar {
+      background: var(--bc-primary) !important;
+    }
+    html.bc-user-polish a,
+    html.bc-user-polish .color-primary {
+      color: var(--bc-primary) !important;
+    }
+    html.bc-user-polish ::selection {
+      background: rgba(201, 79, 46, .18);
+      color: var(--bc-text);
+    }
     .bc-node-traffic-menu {
       display: flex;
       align-items: center;
@@ -50,8 +231,9 @@
     }
     .bc-node-traffic-menu:hover,
     .bc-node-traffic-menu.is-active {
-      background: rgba(15, 118, 110, .10);
-      color: #0f766e;
+      background: var(--bc-primary-soft);
+      color: var(--bc-primary-strong);
+      box-shadow: inset 3px 0 0 0 var(--bc-primary);
     }
     .bc-node-traffic-menu::before {
       content: "";
@@ -69,15 +251,15 @@
       top: var(--bc-node-traffic-top, 74px);
       bottom: 0;
       z-index: 2147483000;
-      background: #f5f7fb;
+      background: var(--bc-bg);
       overflow: hidden;
-      box-shadow: inset 1px 0 0 #eef2f7;
+      box-shadow: inset 1px 0 0 var(--bc-line);
     }
     .bc-node-traffic-frame {
       width: 100%;
       height: 100%;
       border: 0;
-      background: #f5f7fb;
+      background: var(--bc-bg);
     }
     body.bc-node-traffic-open {
       overflow: hidden;
@@ -88,14 +270,14 @@
       gap: 18px;
       min-height: 64px;
       padding: 10px 20px;
-      color: #334155;
+      color: var(--bc-text);
       cursor: pointer;
-      border-top: 1px solid rgba(226, 232, 240, .75);
+      border-top: 1px solid var(--bc-line);
       transition: background .15s ease, color .15s ease;
     }
     .bc-sub-import-row:hover {
-      background: #f8fafc;
-      color: #0f766e;
+      background: var(--bc-primary-soft);
+      color: var(--bc-primary-strong);
     }
     .bc-sub-import-icon {
       display: grid;
@@ -104,8 +286,8 @@
       width: 40px;
       height: 40px;
       border-radius: 8px;
-      background: #eef7f6;
-      color: #0f766e;
+      background: var(--bc-primary-soft);
+      color: var(--bc-primary-strong);
       font-size: 12px;
       font-weight: 800;
       line-height: 1.05;
@@ -119,7 +301,7 @@
     .bc-sub-import-main small {
       display: block;
       margin-top: 2px;
-      color: #64748b;
+      color: var(--bc-text-soft);
       font-size: 12px;
     }
     @media (max-width: 768px) {
@@ -131,6 +313,7 @@
   </style>
   <script>
     (function () {
+      document.documentElement.classList.add('bc-user-polish')
       var pageUrl = '/user-node-traffic.html'
       var menuText = '节点流量明细'
       var inserted = false
