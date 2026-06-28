@@ -298,6 +298,7 @@
       payload: null,
       authToken: '',
       waitingParentAuth: false,
+      loading: false,
     };
 
     const isEmbedded = new URLSearchParams(location.search).get('embed') === '1';
@@ -506,6 +507,7 @@
     }
 
     async function loadData() {
+      if (state.loading) return;
       const token = getAuthToken();
       if (!token) {
         if (isEmbedded) {
@@ -517,29 +519,36 @@
         setStatus('未检测到登录态，请先在用户中心登录', true);
         return;
       }
+      state.loading = true;
       state.waitingParentAuth = false;
       setStatus('加载中');
-      const params = new URLSearchParams({ period: state.period, include_total: '1' });
-      const response = await fetch(`/api/v1/user/stat/getNodeTrafficLog?${params.toString()}`, {
-        headers: { Authorization: token },
-      });
-      if (!response.ok) {
-        if (response.status === 403 && isEmbedded) {
-          state.authToken = '';
-          state.waitingParentAuth = true;
-          try {
-            sessionStorage.removeItem('bc_node_traffic_auth_data');
-          } catch (error) {}
-          window.parent.postMessage({ type: 'bc-node-traffic-need-auth' }, window.location.origin);
+      try {
+        const params = new URLSearchParams({ period: state.period, include_total: '1' });
+        const response = await fetch(`/api/v1/user/stat/getNodeTrafficLog?${params.toString()}`, {
+          headers: { Authorization: token },
+        });
+        if (!response.ok) {
+          if (response.status === 403 && isEmbedded) {
+            state.authToken = '';
+            state.waitingParentAuth = true;
+            try {
+              sessionStorage.removeItem('bc_node_traffic_auth_data');
+            } catch (error) {}
+            window.parent.postMessage({ type: 'bc-node-traffic-need-auth' }, window.location.origin);
+          }
+          setStatus(response.status === 403 ? '登录态无效，请刷新用户中心后重试' : `加载失败：${response.status}`, true);
+          return;
         }
-        setStatus(response.status === 403 ? '登录态无效，请刷新用户中心后重试' : `加载失败：${response.status}`, true);
-        return;
+        state.payload = await response.json();
+        const summary = state.payload.summary || [];
+        renderNodes(summary);
+        renderAll();
+        setStatus(state.payload.meta?.note || '已更新');
+      } catch (error) {
+        setStatus(`加载失败：${error.message || '网络异常'}`, true);
+      } finally {
+        state.loading = false;
       }
-      state.payload = await response.json();
-      const summary = state.payload.summary || [];
-      renderNodes(summary);
-      renderAll();
-      setStatus(state.payload.meta?.note || '已更新');
     }
 
     document.getElementById('periods').addEventListener('click', (event) => {

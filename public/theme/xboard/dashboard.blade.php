@@ -302,11 +302,16 @@
       }
 
       function insertMenu() {
-        if (inserted || document.querySelector('.bc-node-traffic-menu')) {
+        var existingMenu = document.querySelector('.bc-node-traffic-menu')
+        if (existingMenu) {
           inserted = true
-          if (nodeTrafficOpen) renderFrame()
+          if (nodeTrafficOpen) {
+            existingMenu.classList.add('is-active')
+            renderFrame()
+          }
           return
         }
+        inserted = false
 
         var traffic = findTrafficMenu()
         if (!traffic) return
