@@ -5,7 +5,6 @@ namespace App\Plugins\Telegram\Commands;
 use App\Models\User;
 use App\Plugins\Telegram\Telegram;
 use App\Utils\Helper;
-use Illuminate\Support\Facades\Cache;
 
 class Bind extends Telegram {
     public $command = '/bind';
@@ -16,62 +15,20 @@ class Bind extends Telegram {
         if (!isset($message->args[0])) {
             abort(500, '参数有误，请携带订阅地址发送');
         }
-        $subscribeUrl = $message->args[0];
-        $subscribeUrl = parse_url($subscribeUrl);
-        parse_str($subscribeUrl['query'], $query);
-        $token = $query['token'];
+        $subscribeUrl = parse_url($message->args[0]);
+        parse_str(is_array($subscribeUrl) ? ($subscribeUrl['query'] ?? '') : '', $query);
+        $token = $query['token'] ?? '';
+        if (is_array($token)) {
+            $token = '';
+        }
         if (!$token) {
             abort(500, '订阅地址无效');
         }
-        $submethod = (int)config('v2board.show_subscribe_method', 0);
-        switch ($submethod) {
-            case 0:
-                break;
-            case 1:
-                if (!Cache::has("otpn_{$token}")) {
-                    abort(403, 'token is error');
-                }
-                $usertoken = Cache::get("otpn_{$token}");
-                $token = $usertoken;
-                break;
-            case 2:
-                $usertoken = Cache::get("totp_{$token}");
-                if (!$usertoken) {
-                    $timestep = Helper::getSubscribeExpireSeconds();
-                    $counter = floor(time() / $timestep);
-                    $counterBytes = pack('N*', 0) . pack('N*', $counter);
-                    $idhash = Helper::base64DecodeUrlSafe($token);
-                    if (!$idhash || strpos($idhash, ':') === false) {
-                        abort(403, 'token is error');
-                    }
-                    $parts = explode(':', $idhash, 2);
-                    [$userid, $clienthash] = $parts;
-                    if (!$userid || !$clienthash) {
-                        abort(403, 'token is error');
-                    }
-                    $user = User::where('id', $userid)->select('token')->first();
-                    if (!$user) {
-                        abort(403, 'token is error');
-                    }
-                    $usertoken = $user->token;
-                    $hash = hash_hmac('sha1', $counterBytes, $usertoken, false);
-                    if (!hash_equals($hash, $clienthash)) {
-                        abort(403, 'token is error');
-                    }
-                    Cache::put("totp_{$token}", $usertoken, $timestep);
-                }
-                $token = $usertoken;
-                break;
-            case 3:
-                $usertoken = Cache::get("dynsub_{$token}");
-                if (!$usertoken) {
-                    abort(403, 'token is error');
-                }
-                $token = $usertoken;
-                break;
-            default:
-                break;
+        $token = Helper::resolveSubscribeToken((string)$token, false);
+        if (!$token) {
+            abort(403, 'token is error');
         }
+
         $user = User::where('token', $token)->first();
         if (!$user) {
             abort(500, '用户不存在');

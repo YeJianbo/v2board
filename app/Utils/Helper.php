@@ -168,6 +168,64 @@ class Helper
         return $minutes * 60;
     }
 
+    public static function resolveSubscribeToken($token, bool $consumeOneTime = true)
+    {
+        if (!is_string($token) || $token === '') {
+            return null;
+        }
+
+        $submethod = (int)config('v2board.show_subscribe_method', 0);
+        switch ($submethod) {
+            case 0:
+                return $token;
+            case 1:
+                $cacheKey = "otpn_{$token}";
+                $usertoken = $consumeOneTime ? Cache::pull($cacheKey) : Cache::get($cacheKey);
+                if (!$usertoken) {
+                    return null;
+                }
+                if ($consumeOneTime) {
+                    Cache::forget("otp_{$usertoken}");
+                }
+                return $usertoken;
+            case 2:
+                $usertoken = Cache::get("totp_{$token}");
+                if ($usertoken) {
+                    return $usertoken;
+                }
+
+                $idhash = self::base64DecodeUrlSafe($token);
+                if (!$idhash || strpos($idhash, ':') === false) {
+                    return null;
+                }
+
+                [$userid, $clienthash] = explode(':', $idhash, 2);
+                if (!$userid || !$clienthash) {
+                    return null;
+                }
+
+                $user = User::where('id', $userid)->select('token')->first();
+                if (!$user) {
+                    return null;
+                }
+
+                $timestep = self::getSubscribeExpireSeconds();
+                $counter = floor(time() / $timestep);
+                $counterBytes = pack('N*', 0) . pack('N*', $counter);
+                $hash = hash_hmac('sha1', $counterBytes, $user->token, false);
+                if (!hash_equals($hash, $clienthash)) {
+                    return null;
+                }
+
+                Cache::put("totp_{$token}", $user->token, $timestep);
+                return $user->token;
+            case 3:
+                return Cache::get("dynsub_{$token}") ?: null;
+            default:
+                return $token;
+        }
+    }
+
     private static function buildSubscribeUrl($path, $subscribeUrl, $token)
     {
         $path = "{$path}?token={$token}";

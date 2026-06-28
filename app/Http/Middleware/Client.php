@@ -5,7 +5,6 @@ namespace App\Http\Middleware;
 use Closure;
 use App\Models\User;
 use App\Utils\Helper;
-use Illuminate\Support\Facades\Cache;
 
 class Client
 {
@@ -22,56 +21,11 @@ class Client
         if (empty($token)) {
             abort(403, 'token is null');
         }
-        $submethod = (int)config('v2board.show_subscribe_method', 0);
-        switch ($submethod) {
-            case 0:
-                break;
-            case 1:
-                if (!Cache::has("otpn_{$token}")) {
-                    abort(403, 'token is error');
-                }
-                $usertoken = Cache::pull("otpn_{$token}");
-                Cache::forget("otp_{$usertoken}");
-                $token = $usertoken;
-                break;
-            case 2:
-                $usertoken = Cache::get("totp_{$token}");
-                if (!$usertoken) {
-                    $timestep = Helper::getSubscribeExpireSeconds();
-                    $counter = floor(time() / $timestep);
-                    $counterBytes = pack('N*', 0) . pack('N*', $counter);
-                    $idhash = Helper::base64DecodeUrlSafe($token);
-                    if (!$idhash || strpos($idhash, ':') === false) {
-                        abort(403, 'token is error');
-                    }
-                    $parts = explode(':', $idhash, 2);
-                    [$userid, $clienthash] = $parts;
-                    if (!$userid || !$clienthash) {
-                        abort(403, 'token is error');
-                    }
-                    $user = User::where('id', $userid)->select('token')->first();
-                    if (!$user) {
-                        abort(403, 'token is error');
-                    }
-                    $usertoken = $user->token;
-                    $hash = hash_hmac('sha1', $counterBytes, $usertoken, false);
-                    if (!hash_equals($hash, $clienthash)) {
-                        abort(403, 'token is error');
-                    }
-                    Cache::put("totp_{$token}", $usertoken, $timestep);
-                }
-                $token = $usertoken;
-                break;
-            case 3:
-                $usertoken = Cache::get("dynsub_{$token}");
-                if (!$usertoken) {
-                    abort(403, 'token is error');
-                }
-                $token = $usertoken;
-                break;
-            default:
-                break;
+        $token = Helper::resolveSubscribeToken($token, true);
+        if (!$token) {
+            abort(403, 'token is error');
         }
+
         $user = User::where('token', $token)->first();
         if (!$user) {
             abort(403, 'token is error');
