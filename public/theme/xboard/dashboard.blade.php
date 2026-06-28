@@ -298,9 +298,18 @@
       border-radius: 8px;
       background: var(--bc-primary-soft);
       color: var(--bc-primary);
-      font-size: 16px;
-      font-weight: 600;
       line-height: 1;
+      overflow: hidden;
+    }
+    .bc-subscribe-client-badge svg {
+      display: block;
+      width: 22px;
+      height: 22px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     .bc-subscribe-import-row {
       border-radius: 6px;
@@ -722,8 +731,13 @@
       function buildImportUrl(client, subscribeUrl) {
         var title = encodeURIComponent((window.settings && window.settings.title) || document.title || 'BunCloud')
         var encodedUrl = encodeURIComponent(subscribeUrl || '')
+        if (client === 'cmfa') return 'clashmeta://install-config?url=' + encodedUrl + '&name=' + title
         if (client === 'nekobox') return 'nekobox://import?url=' + encodedUrl + '&name=' + title
-        if (client === 'v2rayng') return 'v2rayng://install-config?url=' + encodedUrl
+        if (client === 'surfboard') return 'surfboard:///install-config?url=' + encodedUrl + '&name=' + title
+        if (client === 'flclash') return 'flclash://install-config?url=' + encodedUrl + '&name=' + title
+        if (client === 'v2rayn') return 'v2rayn://install-config?url=' + encodedUrl
+        if (client === 'singbox') return 'sing-box://import-remote-profile?url=' + encodedUrl + '&name=' + title
+        if (client === 'verge') return 'clash://install-config?url=' + encodedUrl + '&name=' + title
         return ''
       }
 
@@ -735,13 +749,56 @@
         })
       }
 
-      function createSubscribeImportItem(label, client, badge) {
+      function getSubscribePlatform() {
+        var ua = String(navigator.userAgent || '').toLowerCase()
+        var platform = String(navigator.platform || '').toLowerCase()
+        if (ua.indexOf('android') !== -1) return 'android'
+        if (ua.indexOf('windows') !== -1 || platform.indexOf('win') === 0) return 'windows'
+        return 'other'
+      }
+
+      function getSubscribeClients() {
+        var android = [
+          { label: 'CMFA', client: 'cmfa' },
+          { label: 'NekoBox', client: 'nekobox' },
+          { label: 'Surfboard', client: 'surfboard' },
+          { label: 'FlClash', client: 'flclash' }
+        ]
+        var windows = [
+          { label: 'v2rayN', client: 'v2rayn' },
+          { label: 'sing-box', client: 'singbox' },
+          { label: 'FlClash', client: 'flclash' },
+          { label: 'Clash Verge Rev', client: 'verge' }
+        ]
+        var platform = getSubscribePlatform()
+        if (platform === 'android') return android
+        if (platform === 'windows') return windows
+        return windows.concat(android.filter(function (item) {
+          return item.client !== 'flclash'
+        }))
+      }
+
+      function getSubscribeClientIcon(client) {
+        var icons = {
+          cmfa: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9.5h10v7a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-7Z"/><path d="M9 9.5 7.5 7M15 9.5 16.5 7M9.5 13h.01M14.5 13h.01"/><path d="M5 11v4M19 11v4"/></svg>',
+          nekobox: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9 5.5 5.5 10 7h4l4.5-1.5L17 9v6.5a3 3 0 0 1-3 3h-4a3 3 0 0 1-3-3V9Z"/><path d="M9.5 12.5h.01M14.5 12.5h.01M10 16c1.2.8 2.8.8 4 0"/></svg>',
+          surfboard: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16c2.4-2 4.6-2 7 0s4.6 2 7 0"/><path d="M6 19c2-1.3 4-1.3 6 0s4 1.3 6 0"/><path d="M8 5c3 2.5 5 6 5 11"/></svg>',
+          flclash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 5 13h6l-1 9 9-13h-6l0-7Z"/></svg>',
+          v2rayn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v13H4z"/><path d="M4 9h16M8 5.5v13"/><path d="m12 13 2 2 4-5"/></svg>',
+          singbox: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 7 4v10l-7 4-7-4V7l7-4Z"/><path d="m5 7 7 4 7-4M12 11v10"/></svg>',
+          verge: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="m15.5 8.5-2.2 5-4.8 2 2.2-5 4.8-2Z"/></svg>'
+        }
+        return icons[client] || '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M9 12h6"/></svg>'
+      }
+
+      function createSubscribeImportItem(label, client) {
         var item = document.createElement('li')
         item.className = 'n-list-item p-0!'
         item.dataset.bcSubscribeImport = client
+        item.dataset.bcSubscribeManaged = '1'
         item.innerHTML = '<div class="n-list-item__main">' +
           '<div class="bc-subscribe-import-row flex cursor-pointer items-center p-2.5" role="button" tabindex="0">' +
-          '<div class="w-16 flex justify-center"><span class="bc-subscribe-client-badge">' + escapeHtml(badge || label.charAt(0)) + '</span></div>' +
+          '<div class="w-16 flex justify-center"><span class="bc-subscribe-client-badge">' + getSubscribeClientIcon(client) + '</span></div>' +
           '<div class="text-gray-500">导入到 ' + escapeHtml(label) + '</div>' +
           '</div>' +
           '</div><div class="n-list-item__divider"></div>'
@@ -754,6 +811,40 @@
           openSubscribeClient(client)
         })
         return item
+      }
+
+      function isSubscribeImportItem(item) {
+        var text = textOf(item)
+        return text.indexOf('导入到') !== -1 && (
+          text.indexOf('ClashVergeRev') !== -1 ||
+          text.indexOf('ClashVerge') !== -1 ||
+          text.indexOf('Hiddify') !== -1 ||
+          text.indexOf('NekoBox') !== -1 ||
+          text.indexOf('v2rayNG') !== -1 ||
+          text.indexOf('v2rayN') !== -1 ||
+          text.indexOf('sing-box') !== -1 ||
+          text.indexOf('FlClash') !== -1 ||
+          text.indexOf('Surfboard') !== -1 ||
+          text.indexOf('CMFA') !== -1
+        )
+      }
+
+      function ensurePlatformSubscribeClients(list) {
+        var items = Array.prototype.slice.call(list.querySelectorAll('.n-list-item'))
+        var insertBefore = null
+        var anchor = null
+        items.forEach(function (item) {
+          if (!anchor && textOf(item).indexOf('复制订阅地址') !== -1) anchor = item
+          if (!insertBefore && isSubscribeImportItem(item)) insertBefore = item
+        })
+        if (!insertBefore && anchor) insertBefore = anchor.nextSibling
+        items.forEach(function (item) {
+          if (item.dataset.bcSubscribeManaged === '1' || isSubscribeImportItem(item)) item.remove()
+        })
+        var next = insertBefore && insertBefore.parentNode === list ? insertBefore : (anchor && anchor.nextSibling ? anchor.nextSibling : null)
+        getSubscribeClients().forEach(function (client) {
+          list.insertBefore(createSubscribeImportItem(client.label, client.client), next)
+        })
       }
 
       function normalizeSubscribeClientLabels(list) {
@@ -774,18 +865,7 @@
           var text = textOf(list)
           if (text.indexOf('复制订阅地址') === -1 || text.indexOf('ClashVergeRev') === -1) return
           normalizeSubscribeClientLabels(list)
-          if (!list.querySelector('[data-bc-subscribe-import="nekobox"]')) {
-            var hiddify = Array.prototype.slice.call(list.querySelectorAll('.n-list-item')).find(function (item) {
-              return textOf(item).indexOf('Hiddify') !== -1
-            })
-            var next = hiddify && hiddify.nextSibling ? hiddify.nextSibling : null
-            list.insertBefore(createSubscribeImportItem('NekoBox', 'nekobox', 'N'), next)
-          }
-          if (!list.querySelector('[data-bc-subscribe-import="v2rayng"]')) {
-            var neko = list.querySelector('[data-bc-subscribe-import="nekobox"]')
-            var insertAfter = neko && neko.nextSibling ? neko.nextSibling : null
-            list.insertBefore(createSubscribeImportItem('v2rayNG', 'v2rayng', 'V'), insertAfter)
-          }
+          ensurePlatformSubscribeClients(list)
         })
       }
 
