@@ -57,12 +57,6 @@
       background: transparent !important;
       box-shadow: none !important;
     }
-    .bc-node-traffic-menu {
-      cursor: pointer;
-    }
-    .bc-node-traffic-menu.is-active {
-      color: var(--bc-primary-strong);
-    }
     .bc-node-traffic-frame-wrap {
       display: block;
       width: 100%;
@@ -176,7 +170,6 @@
       document.documentElement.classList.add('bc-user-polish')
       var pageUrl = '/user-node-traffic.html'
       var menuText = '节点流量明细'
-      var inserted = false
       var nodeTrafficOpen = false
       var activeTitle = null
       var activeFrame = null
@@ -246,34 +239,18 @@
         })
       }
 
-      function openNodeTraffic() {
-        closeNodeTraffic()
-
-        var traffic = findTrafficMenu()
-        var root = traffic ? clickableRoot(traffic) : null
-        if (root && !root.classList.contains('bc-node-traffic-menu')) {
-          root.dispatchEvent(new MouseEvent('click', {
-            bubbles: true,
-            cancelable: true,
-            view: window
-          }))
-        }
-
-        waitForTrafficPage(0)
-      }
-
-      function waitForTrafficPage(attempt) {
+      function ensureNodeTrafficInline(attempt) {
         var title = findTopTitle()
         if (title && textOf(title) === '流量明细') {
           renderFrame()
           return
         }
-        if (attempt >= 8) {
-          syncMenuState(false)
+        if (nodeTrafficOpen) closeNodeTraffic()
+        if (attempt >= 2) {
           return
         }
         setTimeout(function () {
-          waitForTrafficPage(attempt + 1)
+          ensureNodeTrafficInline(attempt + 1)
         }, 120)
       }
 
@@ -299,8 +276,6 @@
       }
 
       function syncMenuState(active) {
-        var menu = document.querySelector('.bc-node-traffic-menu')
-        if (menu) menu.classList.toggle('is-active', !!active)
         document.body.classList.toggle('bc-node-traffic-open', !!active)
         Array.prototype.slice.call(document.querySelectorAll('.n-menu-item-content--selected')).forEach(function (node) {
           if (!node.dataset.bcWasSelected) node.dataset.bcWasSelected = '1'
@@ -390,7 +365,8 @@
         if (insertMenuTimer) return
         insertMenuTimer = window.setTimeout(function () {
           insertMenuTimer = 0
-          insertMenu()
+          removeLegacyNodeTrafficMenu()
+          ensureNodeTrafficInline(0)
           patchSubscribeImports()
         }, 80)
       }
@@ -670,7 +646,6 @@
           updateFrameLayout()
           syncFrameAuth(existing.querySelector('iframe'))
           scheduleChromeSync()
-          existing.scrollIntoView({ block: 'start', behavior: 'smooth' })
           return
         }
 
@@ -706,46 +681,12 @@
         syncFrameAuth(frame, token)
         syncMenuState(true)
         scheduleChromeSync()
-        wrap.scrollIntoView({ block: 'start', behavior: 'smooth' })
       }
 
-      function insertMenu() {
-        var existingMenu = document.querySelector('.bc-node-traffic-menu')
-        if (existingMenu) {
-          inserted = true
-          if (nodeTrafficOpen) {
-            syncMenuState(true)
-            updateFrameLayout()
-            scheduleChromeSync()
-          }
-          return
-        }
-        inserted = false
-
-        var traffic = findTrafficMenu()
-        if (!traffic) return
-
-        var root = clickableRoot(traffic)
-        var item = root.cloneNode(true)
-        resetClonedMenuState(item)
-        item.classList.add('bc-node-traffic-menu')
-        item.removeAttribute('aria-current')
-        item.removeAttribute('data-v-traffic-menu')
-        if (item.tagName === 'A') item.href = 'javascript:void(0)'
-        Array.prototype.slice.call(item.querySelectorAll('a')).forEach(function (link) {
-          link.href = 'javascript:void(0)'
+      function removeLegacyNodeTrafficMenu() {
+        Array.prototype.slice.call(document.querySelectorAll('.bc-node-traffic-menu')).forEach(function (node) {
+          node.remove()
         })
-        replaceMenuText(item, menuText)
-        item.addEventListener('click', function (event) {
-          event.preventDefault()
-          event.stopPropagation()
-          openNodeTraffic()
-        })
-
-        if (root.parentElement) {
-          root.parentElement.insertBefore(item, root.nextSibling)
-          inserted = true
-        }
       }
 
       var observer = new MutationObserver(schedulePatch)
