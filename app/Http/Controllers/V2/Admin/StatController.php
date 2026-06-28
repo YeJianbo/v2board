@@ -1022,7 +1022,8 @@ class StatController extends Controller
                 ? $this->buildNodeRankKey($data->server_type, $data->id)
                 : $data->id;
             $previousValue = isset($previousData[$previousKey]) ? $previousData[$previousKey]->value : 0;
-            $change = $previousValue > 0 ? round(($data->value - $previousValue) / $previousValue * 100, 1) : 0;
+            $hasComparison = $previousValue > 0;
+            $change = $hasComparison ? round(($data->value - $previousValue) / $previousValue * 100, 1) : null;
 
             $result[] = [
                 'id' => (string) $data->id,
@@ -1030,6 +1031,7 @@ class StatController extends Controller
                 'name' => $names[$this->buildNodeRankKey($data->server_type ?? null, $data->id)] ?? $names[$data->id] ?? ($type === 'node' ? "Node {$data->id}" : "User {$data->id}"),
                 'value' => $data->value,
                 'previousValue' => $previousValue,
+                'hasComparison' => $hasComparison,
                 'change' => $change,
                 'timestamp' => date('c', $endDate)
             ];
