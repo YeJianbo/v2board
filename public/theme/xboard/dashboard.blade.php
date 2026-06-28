@@ -715,7 +715,20 @@
         if (!protocol || protocol === 'v2node') {
           protocol = serverType === 'v2node' ? '' : serverType
         }
-        return protocol || '未知'
+        var labels = {
+          shadowsocks: 'Shadowsocks',
+          trojan: 'Trojan',
+          vmess: 'VMess',
+          vless: 'VLESS',
+          hysteria: 'Hysteria2',
+          hysteria2: 'Hysteria2',
+          anytls: 'AnyTLS',
+          tuic: 'TUIC',
+          socks: 'SOCKS',
+          socks5: 'SOCKS5',
+          http: 'HTTP'
+        }
+        return labels[protocol] || (protocol ? protocol.toUpperCase() : '未知')
       }
 
       function formatTrafficTime(value, period) {
