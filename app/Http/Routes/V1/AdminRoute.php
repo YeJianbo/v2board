@@ -36,6 +36,7 @@ class AdminRoute
             $router->post('/machine/createV2node', 'V1\\Admin\\MachineController@createV2node');
             $router->post('/machine/deployCommand', 'V1\\Admin\\MachineController@deployCommand');
             $router->post('/machine/restartV2node', 'V1\\Admin\\MachineController@restartV2node');
+            $router->post('/machine/enableBbr', 'V1\\Admin\\MachineController@enableBbr');
             $router->get ('/server/route/fetch', 'V1\\Admin\\Server\\RouteController@fetch');
             $router->post('/server/route/save', 'V1\\Admin\\Server\\RouteController@save');
             $router->post('/server/route/drop', 'V1\\Admin\\Server\\RouteController@drop');

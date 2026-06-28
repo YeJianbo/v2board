@@ -713,12 +713,14 @@ class MachineController extends Controller
             ->values();
 
         $restartToken = Cache::get('v2node_probe_restart:' . $machine->id);
+        $enableBbrToken = Cache::get('v2node_probe_enable_bbr:' . $machine->id);
         $ddnsHost = $this->resolveDdnsHost($machine);
         $currentIp = trim((string) ($status['primary_ip'] ?? $status['remote_ip'] ?? $status['ip'] ?? ''));
 
         return response()->json([
             'data' => $nodes,
             'restart_v2node_token' => $restartToken ?: '',
+            'enable_bbr_token' => $enableBbrToken ?: '',
             'probe' => [
                 'firewall_rules' => $this->buildProbeFirewallRules($machine),
                 'relay' => [
@@ -755,6 +757,26 @@ class MachineController extends Controller
 
         $cacheKey = 'v2node_probe_restart:' . $machine->id;
         if (hash_equals((string) Cache::get($cacheKey, ''), (string) $params['restart_token'])) {
+            Cache::forget($cacheKey);
+        }
+
+        return response()->json([
+            'data' => 'success',
+        ]);
+    }
+
+    public function bbrAck(Request $request)
+    {
+        $machine = $this->authenticate($request);
+        $this->touchMachineHeartbeat($machine, $request);
+        $params = $request->validate([
+            'enable_bbr_token' => 'required|string',
+            'status' => 'nullable|string|max:32',
+            'error' => 'nullable|string|max:255',
+        ]);
+
+        $cacheKey = 'v2node_probe_enable_bbr:' . $machine->id;
+        if (hash_equals((string) Cache::get($cacheKey, ''), (string) $params['enable_bbr_token'])) {
             Cache::forget($cacheKey);
         }
 

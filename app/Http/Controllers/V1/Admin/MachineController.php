@@ -434,7 +434,7 @@ class MachineController extends Controller
     // Generate deploy command for the specific machine
     public function deployCommand(Request $request)
     {
-        abort(410, '通用远程命令下发已禁用；探针只支持配置同步、DDNS、端口转发和 v2node 服务重启');
+        abort(410, '通用远程命令下发已禁用；探针只支持配置同步、DDNS、端口转发、v2node 服务重启和固定网络优化');
     }
 
     public function restartV2node(Request $request)
@@ -457,6 +457,35 @@ class MachineController extends Controller
                 'restart_token' => $restartToken,
             ],
             'message' => 'v2node 重启指令已下发',
+        ]);
+    }
+
+    public function enableBbr(Request $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|exists:v2_machine,id',
+        ]);
+
+        $machine = Machine::findOrFail($params['id']);
+        $status = $this->decodeStatus($machine->status) ?: [];
+        $virtualization = strtolower(trim((string) ($status['virtualization'] ?? '')));
+        if ($virtualization !== 'kvm') {
+            abort(422, 'BBR 仅对 KVM 虚拟化机器开放');
+        }
+
+        $enableToken = (string) time() . '-' . Str::random(12);
+
+        Cache::put(
+            'v2node_probe_enable_bbr:' . $machine->id,
+            $enableToken,
+            300
+        );
+
+        return response([
+            'data' => [
+                'enable_bbr_token' => $enableToken,
+            ],
+            'message' => 'BBR 启用指令已下发',
         ]);
     }
 }
