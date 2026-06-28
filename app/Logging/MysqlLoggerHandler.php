@@ -9,6 +9,8 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
 {
     private const MASK = '[FILTERED]';
     private const TEXT_LIMIT = 16000;
+    private const MAX_DEPTH = 6;
+    private const MAX_ITEMS = 100;
 
     private const SENSITIVE_KEYS = [
         'auth_data',
@@ -44,8 +46,8 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
     protected function write(array $record): void
     {
         try{
-            if(isset($record['context']['exception']) && is_object($record['context']['exception'])){
-                $record['context']['exception'] = (array)$record['context']['exception'];
+            if (isset($record['context']['exception']) && $record['context']['exception'] instanceof \Throwable) {
+                $record['context']['exception'] = $this->sanitizeThrowable($record['context']['exception']);
             }
             $request = null;
             if (app()->bound('request')) {
@@ -92,22 +94,43 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
         }
     }
 
-    private function sanitizeData($value, string $key = '')
+    private function sanitizeData($value, string $key = '', int $depth = 0)
     {
         if ($this->isSensitiveKey($key)) {
             return self::MASK;
         }
 
+        if ($depth >= self::MAX_DEPTH) {
+            return '[DEPTH_LIMIT]';
+        }
+
+        if ($value instanceof \Throwable) {
+            return $this->sanitizeThrowable($value);
+        }
+
         if (is_array($value)) {
             $sanitized = [];
+            $count = 0;
             foreach ($value as $childKey => $childValue) {
-                $sanitized[$childKey] = $this->sanitizeData($childValue, (string)$childKey);
+                if ($count >= self::MAX_ITEMS) {
+                    $sanitized['__truncated'] = true;
+                    break;
+                }
+                $sanitized[$childKey] = $this->sanitizeData($childValue, (string)$childKey, $depth + 1);
+                $count++;
             }
             return $sanitized;
         }
 
         if (is_object($value)) {
-            return $this->sanitizeData((array)$value, $key);
+            if ($value instanceof \DateTimeInterface) {
+                return $value->format(DATE_ATOM);
+            }
+
+            return [
+                '__class' => get_class($value),
+                '__summary' => '[OBJECT]',
+            ];
         }
 
         if (is_string($value)) {
@@ -115,6 +138,25 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
         }
 
         return $value;
+    }
+
+    private function sanitizeThrowable(\Throwable $throwable): array
+    {
+        return [
+            'class' => get_class($throwable),
+            'message' => $this->limitString($this->sanitizeString($throwable->getMessage()), 2000),
+            'file' => $throwable->getFile(),
+            'line' => $throwable->getLine(),
+            'code' => $throwable->getCode(),
+            'trace' => array_slice(array_map(function ($frame) {
+                return [
+                    'file' => $frame['file'] ?? null,
+                    'line' => $frame['line'] ?? null,
+                    'function' => $frame['function'] ?? null,
+                    'class' => $frame['class'] ?? null,
+                ];
+            }, $throwable->getTrace()), 0, 20),
+        ];
     }
 
     private function safeJson($value): string
