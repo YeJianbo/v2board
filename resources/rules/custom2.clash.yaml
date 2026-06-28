@@ -1,90 +1,95 @@
+mode: rule
 mixed-port: 8964
 allow-lan: true
-bind-address: "*"
-mode: rule
 log-level: info
-# external-controller: 127.0.0.1:8964
+ipv6: true
+external-controller: 127.0.0.1:18964
+secret: set-your-secret
+unified-delay: true
+dns:
+  enable: true
+  listen: :53
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter-mode: blacklist
+  prefer-h3: false
+  respect-rules: false
+  use-hosts: true
+  use-system-hosts: false
+  fake-ip-filter:
+  - '*.lan'
+  - '*.local'
+  - '*.arpa'
+  - time.*.com
+  - ntp.*.com
+  - time.*.com
+  - +.market.xiaomi.com
+  - localhost.ptlogin2.qq.com
+  - '*.msftncsi.com'
+  - www.msftconnecttest.com
+  default-nameserver:
+  - 223.6.6.6
+  - 8.8.8.8
+  nameserver:
+  - 8.8.8.8
+  - https://doh.pub/dns-query
+  - https://dns.alidns.com/dns-query
+  fallback:
+  - https://dns.alidns.com/dns-query
+  - https://dns.google/dns-query
+  - https://cloudflare-dns.com/dns-query
+  nameserver-policy: {}
+  proxy-server-nameserver:
+  - https://doh.pub/dns-query
+  - https://dns.alidns.com/dns-query
+  direct-nameserver: []
+  direct-nameserver-follow-policy: false
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+    - 240.0.0.0/4
+    - 0.0.0.0/32
+    domain:
+    - +.google.com
+    - +.facebook.com
+    - +.youtube.com
+profile:
+  store-selected: true
+bind-address: '*'
+external-controller-pipe: \\.\pipe\verge-mihomo
 
 hosts:
-  'mtalk.google.com': 142.250.157.188
-  #'mtalk.google.com': 2404:6800:4008:c07::bc
-  'alt1-mtalk.google.com': 74.125.200.188
-  'alt2-mtalk.google.com': 142.250.141.188
-  'alt3-mtalk.google.com': 64.233.171.188
-  'alt4-mtalk.google.com': 173.194.202.188
-  'alt5-mtalk.google.com': 74.125.126.188
-  'alt6-mtalk.google.com': 142.250.115.188
-  'alt7-mtalk.google.com': 108.177.104.188
-  'alt8-mtalk.google.com': 142.250.152.188
-  'dl.google.com': 180.163.151.161
-  'dl.l.google.com': 180.163.150.33
+  mtalk.google.com: 142.250.157.188
+  alt1-mtalk.google.com: 74.125.200.188
+  alt2-mtalk.google.com: 142.250.141.188
+  alt3-mtalk.google.com: 64.233.171.188
+  alt4-mtalk.google.com: 173.194.202.188
+  alt5-mtalk.google.com: 74.125.126.188
+  alt6-mtalk.google.com: 142.250.115.188
+  alt7-mtalk.google.com: 108.177.104.188
+  alt8-mtalk.google.com: 142.250.152.188
+  dl.google.com: 180.163.151.161
+  dl.l.google.com: 180.163.150.33
 
-# dns:
-#   enable: true
-#   listen: 0.0.0.0:53
-#   ipv6: true
-#   default-nameserver:
-#     - 223.5.5.5
-#     - 119.29.29.29
-#   fake-ip-range: 198.18.0.1/16
-#   use-hosts: true
-#   nameserver:
-#     - https://doh.pub/dns-query
-#   fallback:
-#     - tls://1.0.0.1:853
-#     - https://cloudflare-dns.com/dns-query
-#     - https://dns.google/dns-query
-#   fallback-filter:
-#     geoip: true
-#     ipcidr:
-#       - 240.0.0.0/4
-#       - 0.0.0.0/32
-
-dns:
-    enable: true
-    listen: ':53'
-    ipv6: true
-    enhanced-mode: 'fake-ip'
-    fake-ip-range: '198.18.0.1/16'
-    fake-ip-filter-mode: 'blacklist'
-    prefer-h3: false
-    respect-rules: true
-    use-hosts: true
-    use-system-hosts: false
-    fake-ip-filter:
-      - '*.lan'
-      - '*.local'
-      - '*.arpa'
-      - 'ntp.*.com'
-      - 'time.*.com'
-      - '+.market.xiaomi.com'
-      - 'localhost.ptlogin2.qq.com'
-      - '*.msftncsi.com'
-      - 'www.msftconnecttest.com'
-    default-nameserver:
-      - '223.6.6.6'
-      - '119.29.29.29'
-    nameserver:
-      - 'https://doh.pub/dns-query'
-      - 'https://dns.alidns.com/dns-query'
-    direct-nameserver-follow-policy: false
-    fallback-filter:
-      geoip: true
-      geoip-code: 'CN'
-      ipcidr:
-        - '240.0.0.0/4'
-        - '0.0.0.0/32'
-      domain:
-        - '+.google.com'
-        - '+.facebook.com'
-        - '+.youtube.com'
-    fallback:
-      - 'https://dns.alidns.com/dns-query'
-      - 'https://dns.google/dns-query'
-      - 'https://cloudflare-dns.com/dns-query'
-    proxy-server-nameserver:
-      - 'https://doh.pub/dns-query'
-      - 'https://dns.alidns.com/dns-query'
+tun:
+  stack: gvisor
+  device: Meta
+  auto-route: true
+  strict-route: false
+  auto-detect-interface: true
+  dns-hijack:
+  - any:53
+  mtu: 9000
+  enable: true
+external-controller-cors:
+  allow-private-network: true
+  allow-origins:
+  - tauri://localhost
+  - http://tauri.localhost
+  - https://yacd.metacubex.one
+  - https://metacubex.github.io
+  - https://board.zash.run.place
 
 
 proxies:
