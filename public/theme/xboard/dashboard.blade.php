@@ -146,6 +146,7 @@
       border-color: rgba(24, 160, 88, .34);
       background: rgba(24, 160, 88, .035);
       font-weight: 500;
+      text-transform: none !important;
     }
     .bc-node-traffic-pill--rate {
       min-width: 54px;
@@ -259,6 +260,7 @@
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
       var nodeTrafficPageSize = 10
+      var nodeTrafficPatchVersion = '20260628-protocol-labels'
       var subscribeInfoCache = null
       var subscribeInfoLoading = null
       var titleCandidates = [
@@ -727,8 +729,8 @@
       }
 
       function formatProtocol(row) {
-        var serverType = String(row.server_type || row.node_type || '').toLowerCase()
-        var protocol = String(row.protocol || row.display_protocol || row.type || '').toLowerCase()
+        var serverType = String(row.server_type || row.node_type || '').trim().toLowerCase()
+        var protocol = String(row.protocol || row.display_protocol || row.type || '').trim().toLowerCase()
         if (!protocol || protocol === 'v2node') {
           protocol = serverType === 'v2node' ? '' : serverType
         }
@@ -790,6 +792,7 @@
 
       function setupNodeTrafficTable(table) {
         table.dataset.bcNodeTrafficTable = '1'
+        table.dataset.bcNodeTrafficVersion = nodeTrafficPatchVersion
         table.classList.add('bc-node-traffic-legacy-table')
         ensureNodeTrafficColgroup(table)
         var thead = table.tHead || table.createTHead()
@@ -937,6 +940,7 @@
         var tbody = table.tBodies[0]
         if (!thead || !tbody) return
         nodeTrafficRenderCache[nodeTrafficPeriod] = {
+          version: nodeTrafficPatchVersion,
           thead: thead.innerHTML,
           tbody: tbody.innerHTML,
           pageMeta: pageMeta || null
@@ -946,7 +950,9 @@
       function restoreNodeTrafficTable(table) {
         var cache = nodeTrafficRenderCache[nodeTrafficPeriod]
         if (!cache) return false
+        if (cache.version !== nodeTrafficPatchVersion) return false
         table.dataset.bcNodeTrafficTable = '1'
+        table.dataset.bcNodeTrafficVersion = nodeTrafficPatchVersion
         table.classList.add('bc-node-traffic-legacy-table')
         var thead = table.tHead || table.createTHead()
         var tbody = table.tBodies[0] || table.createTBody()
@@ -1016,6 +1022,11 @@
         setTopTitleActive(true)
         removeTrafficNotice()
         ensureTrafficToolbar(table)
+        if (table.dataset.bcNodeTrafficVersion && table.dataset.bcNodeTrafficVersion !== nodeTrafficPatchVersion) {
+          table.dataset.bcNodeTrafficLoaded = ''
+          table.dataset.bcNodeTrafficLoading = ''
+          table.dataset.bcNodeTrafficFailed = ''
+        }
         if (restoreNodeTrafficTable(table) && !forceReload) {
           if (shouldScroll) table.scrollIntoView({ block: 'start', behavior: 'smooth' })
           return true

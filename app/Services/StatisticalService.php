@@ -175,14 +175,17 @@ class StatisticalService {
 
     public function getStatRecord($type)
     {
+        $startAt = $this->startAt ?: strtotime(date('Y-m-d', strtotime('-30 days')));
+        $endAt = $this->endAt ?: strtotime('+1 day', strtotime(date('Y-m-d')));
+
         switch ($type) {
             case "paid_total": {
                 return Stat::select([
                     '*',
                     DB::raw('paid_total / 100 as paid_total')
                 ])
-                    ->where('record_at', '>=', $this->startAt)
-                    ->where('record_at', '<', $this->endAt)
+                    ->where('record_at', '>=', $startAt)
+                    ->where('record_at', '<', $endAt)
                     ->orderBy('record_at', 'ASC')
                     ->get();
             }
@@ -191,18 +194,20 @@ class StatisticalService {
                     '*',
                     DB::raw('commission_total / 100 as commission_total')
                 ])
-                    ->where('record_at', '>=', $this->startAt)
-                    ->where('record_at', '<', $this->endAt)
+                    ->where('record_at', '>=', $startAt)
+                    ->where('record_at', '<', $endAt)
                     ->orderBy('record_at', 'ASC')
                     ->get();
             }
             case "register_count": {
-                return Stat::where('record_at', '>=', $this->startAt)
-                    ->where('record_at', '<', $this->endAt)
+                return Stat::where('record_at', '>=', $startAt)
+                    ->where('record_at', '<', $endAt)
                     ->orderBy('record_at', 'ASC')
                     ->get();
             }
         }
+
+        return collect();
     }
 
     public function getRanking($type, $limit = 20)

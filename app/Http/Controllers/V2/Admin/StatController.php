@@ -776,6 +776,20 @@ class StatController extends Controller
 
     public function getStatRecord(Request $request)
     {
+        $request->validate([
+            'type' => 'required|in:paid_total,commission_total,register_count',
+            'start_at' => 'nullable|integer|min:1000000000|max:9999999999',
+            'end_at' => 'nullable|integer|min:1000000000|max:9999999999',
+        ]);
+
+        if ($request->input('start_at')) {
+            $this->service->setStartAt((int) $request->input('start_at'));
+        }
+
+        if ($request->input('end_at')) {
+            $this->service->setEndAt((int) $request->input('end_at'));
+        }
+
         return [
             'data' => $this->service->getStatRecord($request->input('type'))
         ];
