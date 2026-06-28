@@ -57,6 +57,12 @@
       background: transparent !important;
       box-shadow: none !important;
     }
+    .bc-node-traffic-menu {
+      cursor: pointer;
+    }
+    .bc-node-traffic-menu.is-active {
+      color: var(--bc-primary-strong);
+    }
     .bc-node-traffic-frame-wrap {
       display: block;
       width: 100%;
@@ -239,10 +245,23 @@
         })
       }
 
-      function ensureNodeTrafficInline(attempt) {
+      function openNodeTraffic() {
+        var traffic = findTrafficMenu()
+        var root = traffic ? clickableRoot(traffic) : null
+        if (root && !root.classList.contains('bc-node-traffic-menu')) {
+          root.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          }))
+        }
+        ensureNodeTrafficInline(0, true)
+      }
+
+      function ensureNodeTrafficInline(attempt, shouldScroll) {
         var title = findTopTitle()
         if (title && textOf(title) === '流量明细') {
-          renderFrame()
+          renderFrame(!!shouldScroll)
           return
         }
         if (nodeTrafficOpen) closeNodeTraffic()
@@ -250,7 +269,7 @@
           return
         }
         setTimeout(function () {
-          ensureNodeTrafficInline(attempt + 1)
+          ensureNodeTrafficInline(attempt + 1, shouldScroll)
         }, 120)
       }
 
@@ -276,6 +295,8 @@
       }
 
       function syncMenuState(active) {
+        var menu = document.querySelector('.bc-node-traffic-menu')
+        if (menu) menu.classList.toggle('is-active', !!active)
         document.body.classList.toggle('bc-node-traffic-open', !!active)
         Array.prototype.slice.call(document.querySelectorAll('.n-menu-item-content--selected')).forEach(function (node) {
           if (!node.dataset.bcWasSelected) node.dataset.bcWasSelected = '1'
@@ -365,7 +386,7 @@
         if (insertMenuTimer) return
         insertMenuTimer = window.setTimeout(function () {
           insertMenuTimer = 0
-          removeLegacyNodeTrafficMenu()
+          insertNodeTrafficMenu()
           ensureNodeTrafficInline(0)
           patchSubscribeImports()
         }, 80)
@@ -631,7 +652,7 @@
         closeNodeTraffic()
       }
 
-      function renderFrame() {
+      function renderFrame(shouldScroll) {
         var title = findTopTitle()
         if (!title || textOf(title) !== '流量明细') {
           syncMenuState(false)
@@ -646,6 +667,7 @@
           updateFrameLayout()
           syncFrameAuth(existing.querySelector('iframe'))
           scheduleChromeSync()
+          if (shouldScroll) existing.scrollIntoView({ block: 'start', behavior: 'smooth' })
           return
         }
 
@@ -681,12 +703,41 @@
         syncFrameAuth(frame, token)
         syncMenuState(true)
         scheduleChromeSync()
+        if (shouldScroll) wrap.scrollIntoView({ block: 'start', behavior: 'smooth' })
       }
 
-      function removeLegacyNodeTrafficMenu() {
-        Array.prototype.slice.call(document.querySelectorAll('.bc-node-traffic-menu')).forEach(function (node) {
-          node.remove()
+      function insertNodeTrafficMenu() {
+        var existingMenu = document.querySelector('.bc-node-traffic-menu')
+        if (existingMenu) {
+          if (nodeTrafficOpen) {
+            syncMenuState(true)
+            updateFrameLayout()
+            scheduleChromeSync()
+          }
+          return
+        }
+
+        var traffic = findTrafficMenu()
+        if (!traffic) return
+
+        var root = clickableRoot(traffic)
+        var item = root.cloneNode(true)
+        resetClonedMenuState(item)
+        item.classList.add('bc-node-traffic-menu')
+        item.removeAttribute('aria-current')
+        item.removeAttribute('data-v-traffic-menu')
+        if (item.tagName === 'A') item.href = 'javascript:void(0)'
+        Array.prototype.slice.call(item.querySelectorAll('a')).forEach(function (link) {
+          link.href = 'javascript:void(0)'
         })
+        replaceMenuText(item, menuText)
+        item.addEventListener('click', function (event) {
+          event.preventDefault()
+          event.stopPropagation()
+          openNodeTraffic()
+        })
+
+        if (root.parentElement) root.parentElement.insertBefore(item, root.nextSibling)
       }
 
       var observer = new MutationObserver(schedulePatch)
