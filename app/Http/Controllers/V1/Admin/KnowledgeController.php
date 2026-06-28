@@ -43,8 +43,12 @@ class KnowledgeController extends Controller
                 abort(500, '创建失败');
             }
         } else {
+            $knowledge = Knowledge::find($request->input('id'));
+            if (!$knowledge) {
+                abort(500, '知识不存在');
+            }
             try {
-                Knowledge::find($request->input('id'))->update($params);
+                $knowledge->update($params);
             } catch (\Exception $e) {
                 abort(500, '保存失败');
             }
@@ -80,6 +84,9 @@ class KnowledgeController extends Controller
         try {
             foreach ($request->input('knowledge_ids') as $k => $v) {
                 $knowledge = Knowledge::find($v);
+                if (!$knowledge) {
+                    throw new \Exception('知识不存在');
+                }
                 $knowledge->timestamps = false;
                 $knowledge->update(['sort' => $k + 1]);
             }

@@ -118,7 +118,8 @@ class PaymentController extends Controller
         try {
             DB::beginTransaction();
             foreach ($request->input('ids') as $k => $v) {
-                if (!Payment::find($v)->update(['sort' => $k + 1])) {
+                $payment = Payment::find($v);
+                if (!$payment || !$payment->update(['sort' => $k + 1])) {
                     throw new \Exception();
                 }
             }

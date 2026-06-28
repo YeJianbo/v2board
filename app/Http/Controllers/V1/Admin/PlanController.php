@@ -113,7 +113,8 @@ class PlanController extends Controller
     {
         DB::beginTransaction();
         foreach ($request->input('plan_ids') as $k => $v) {
-            if (!Plan::find($v)->update(['sort' => $k + 1])) {
+            $plan = Plan::find($v);
+            if (!$plan || !$plan->update(['sort' => $k + 1])) {
                 DB::rollBack();
                 abort(500, '保存失败');
             }

@@ -108,7 +108,11 @@ class CouponController extends Controller
             }
         } else {
             try {
-                Coupon::find($request->input('id'))->update($params);
+                $coupon = Coupon::find($request->input('id'));
+                if (!$coupon) {
+                    return $this->fail([400202, '优惠券不存在']);
+                }
+                $coupon->update($params);
             } catch (\Exception $e) {
                 \Log::error($e);
                 return $this->fail([500, '保存失败']);

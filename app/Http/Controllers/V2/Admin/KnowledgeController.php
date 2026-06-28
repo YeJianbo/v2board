@@ -41,7 +41,11 @@ class KnowledgeController extends Controller
             }
         } else {
             try {
-                Knowledge::find($request->input('id'))->update($params);
+                $knowledge = Knowledge::find($request->input('id'));
+                if (!$knowledge) {
+                    return $this->fail([400202, '知识不存在']);
+                }
+                $knowledge->update($params);
             } catch (\Exception $e) {
                 \Log::error($e);
                 return $this->fail([500, '创建失败']);
@@ -82,6 +86,9 @@ class KnowledgeController extends Controller
             DB::beginTransaction();
             foreach ($request->input('ids') as $k => $v) {
                 $knowledge = Knowledge::find($v);
+                if (!$knowledge) {
+                    throw new ApiException('知识不存在');
+                }
                 $knowledge->timestamps = false;
                 $knowledge->update(['sort' => $k + 1]);
             }

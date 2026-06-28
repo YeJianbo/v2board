@@ -252,7 +252,11 @@ class UserController extends Controller
         ], [
             'id.required' => '用户ID不能为空'
         ]);
-        $user = User::find($request->input('id'))->load('invite_user');
+        $user = User::find($request->input('id'));
+        if (!$user) {
+            return $this->fail([400202, '用户不存在']);
+        }
+        $user->load('invite_user');
         if ($user) {
             $online = self::getOnlineState((int) $user->id);
             $user->setAttribute('online_count', $online['count']);

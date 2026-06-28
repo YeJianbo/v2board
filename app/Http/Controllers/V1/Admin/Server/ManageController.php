@@ -44,9 +44,13 @@ class ManageController extends Controller
         }
         DB::beginTransaction();
         foreach ($params as $k => $v) {
+            if (empty($v) || !is_array($v)) {
+                continue;
+            }
             $model = 'App\\Models\\Server' . ucfirst($k);
             foreach($v as $id => $sort) {
-                if (!$model::find($id)->update(['sort' => $sort])) {
+                $server = $model::find($id);
+                if (!$server || !$server->update(['sort' => $sort])) {
                     DB::rollBack();
                     abort(500, '保存失败');
                 }

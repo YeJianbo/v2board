@@ -114,7 +114,8 @@ class PlanController extends Controller
         try {
             DB::beginTransaction();
             foreach ($params['ids'] as $k => $v) {
-                if (!Plan::find($v)->update(['sort' => $k + 1])) {
+                $plan = Plan::find($v);
+                if (!$plan || !$plan->update(['sort' => $k + 1])) {
                     throw new \Exception();
                 }
             }
