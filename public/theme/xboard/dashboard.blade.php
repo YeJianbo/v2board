@@ -56,140 +56,62 @@
     .bc-node-traffic-table-toolbar {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 12px;
+      justify-content: flex-end;
+      gap: 6px;
+      margin: 0 0 12px;
       padding: 0;
       background: transparent;
       box-shadow: none;
     }
-    .bc-node-traffic-table-title {
-      margin: 0;
-      color: var(--bc-text);
-      font-size: 16px;
-      font-weight: 700;
-      line-height: 1.3;
-    }
-    .bc-node-traffic-table-desc {
-      margin: 4px 0 0;
-      color: var(--bc-text-soft);
-      font-size: 12px;
-      line-height: 1.5;
-    }
     .bc-node-traffic-periods {
       display: inline-flex;
       align-items: center;
-      gap: 0;
-      padding: 2px;
-      border: 1px solid var(--bc-line);
+      gap: 6px;
+      padding: 0;
+      border: 0;
       border-radius: 8px;
-      background: var(--bc-panel);
+      background: transparent;
     }
     .bc-node-traffic-periods button {
-      min-width: 54px;
-      height: 28px;
-      padding: 0 12px;
-      border: 0;
+      min-width: 58px;
+      height: 32px;
+      padding: 0 14px;
+      border: 1px solid var(--bc-line-strong);
       border-radius: 6px;
-      background: transparent;
+      background: #fff;
       color: var(--bc-text-soft);
       font-size: 12px;
-      line-height: 28px;
+      line-height: 30px;
       cursor: pointer;
       transition: color .15s ease, background-color .15s ease;
     }
     .bc-node-traffic-periods button.is-active {
       background: var(--bc-primary);
+      border-color: var(--bc-primary);
       color: #fff;
       box-shadow: var(--bc-shadow-xs);
     }
     table.bc-node-traffic-legacy-table {
       width: 100%;
-      table-layout: fixed;
-      border-collapse: separate;
-      border-spacing: 0;
-      overflow: hidden;
-      border: 1px solid var(--bc-line);
-      border-radius: 8px;
-      background: var(--bc-panel);
-    }
-    table.bc-node-traffic-legacy-table th,
-    table.bc-node-traffic-legacy-table td {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--bc-line);
-      color: var(--bc-text);
-      font-size: 13px;
-      line-height: 1.45;
-      text-align: left;
-      vertical-align: middle;
-      white-space: nowrap;
-    }
-    table.bc-node-traffic-legacy-table th {
-      background: var(--bc-panel-soft);
-      color: var(--bc-text-soft);
-      font-size: 12px;
-      font-weight: 600;
-    }
-    table.bc-node-traffic-legacy-table tbody tr:last-child td {
-      border-bottom: 0;
-    }
-    table.bc-node-traffic-legacy-table tbody tr:hover td {
-      background: var(--bc-primary-soft);
+      table-layout: auto;
     }
     table.bc-node-traffic-legacy-table th:nth-child(2),
     table.bc-node-traffic-legacy-table td:nth-child(2) {
-      width: 24%;
+      min-width: 180px;
       white-space: normal;
     }
     table.bc-node-traffic-legacy-table th:nth-child(3),
     table.bc-node-traffic-legacy-table td:nth-child(3) {
-      width: 96px;
-    }
-    .bc-node-traffic-node {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-    }
-    .bc-node-traffic-node strong {
-      overflow: hidden;
-      color: var(--bc-text);
-      font-size: 13px;
-      font-weight: 500;
-      line-height: 1.35;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .bc-node-traffic-node span {
-      color: var(--bc-text-soft);
-      font-size: 11px;
-      line-height: 1.3;
-    }
-    .bc-node-traffic-protocol {
-      display: inline-flex;
-      align-items: center;
-      min-height: 22px;
-      padding: 0 8px;
-      border: 1px solid var(--bc-primary-border);
-      border-radius: 6px;
-      background: var(--bc-primary-soft);
-      color: var(--bc-primary-strong);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
+      min-width: 84px;
     }
     .bc-node-traffic-empty {
-      padding: 28px 12px !important;
       color: var(--bc-text-soft);
       text-align: center;
     }
     @media (max-width: 768px) {
-      .bc-node-traffic-table-toolbar {
-        align-items: stretch;
-        flex-direction: column;
-      }
       .bc-node-traffic-periods {
-        justify-content: space-between;
+        width: 100%;
+        justify-content: flex-end;
       }
     }
   </style>
@@ -580,7 +502,7 @@
         if (!toolbar) {
           toolbar = document.createElement('div')
           toolbar.className = 'bc-node-traffic-table-toolbar'
-          toolbar.innerHTML = '<div><p class="bc-node-traffic-table-title">节点流量明细</p><p class="bc-node-traffic-table-desc">直接按节点列出实际用量、倍率和计费流量。</p></div><div class="bc-node-traffic-periods"><button type="button" data-period="day">按天</button><button type="button" data-period="hour">按小时</button><button type="button" data-period="minute">按分钟</button></div>'
+          toolbar.innerHTML = '<div class="bc-node-traffic-periods"><button type="button" data-period="day">按天</button><button type="button" data-period="hour">按小时</button><button type="button" data-period="minute">按分钟</button></div>'
           parent.insertBefore(toolbar, table)
           toolbar.addEventListener('click', function (event) {
             var button = event.target && event.target.closest ? event.target.closest('button[data-period]') : null
@@ -598,19 +520,23 @@
         return toolbar
       }
 
-      function setNodeTrafficLoading(table, message) {
+      function setupNodeTrafficTable(table) {
         table.dataset.bcNodeTrafficTable = '1'
         table.classList.add('bc-node-traffic-legacy-table')
         var thead = table.tHead || table.createTHead()
-        var tbody = table.tBodies[0] || table.createTBody()
         thead.innerHTML = '<tr><th>时间</th><th>节点</th><th>协议</th><th>倍率</th><th>实际上行</th><th>实际下行</th><th>实际使用</th><th>计费流量</th></tr>'
+        return table.tBodies[0] || table.createTBody()
+      }
+
+      function setNodeTrafficMessage(table, message) {
+        var tbody = setupNodeTrafficTable(table)
         tbody.innerHTML = '<tr><td class="bc-node-traffic-empty" colspan="8">' + escapeHtml(message || '加载中...') + '</td></tr>'
       }
 
       function renderNodeTrafficRows(table, payload) {
         var rows = payload && Array.isArray(payload.data) ? payload.data : []
         var meta = payload && payload.meta ? payload.meta : {}
-        var tbody = table.tBodies[0] || table.createTBody()
+        var tbody = setupNodeTrafficTable(table)
         if (!rows.length) {
           tbody.innerHTML = '<tr><td class="bc-node-traffic-empty" colspan="8">' + escapeHtml(meta.note || '暂无节点维度流量数据') + '</td></tr>'
           return
@@ -621,8 +547,8 @@
           var protocol = formatProtocol(row)
           return '<tr>' +
             '<td>' + escapeHtml(formatTrafficTime(row.record_at, nodeTrafficPeriod)) + '</td>' +
-            '<td><div class="bc-node-traffic-node"><strong title="' + escapeHtml(nodeName) + '">' + escapeHtml(nodeName) + '</strong></div></td>' +
-            '<td><span class="bc-node-traffic-protocol">' + escapeHtml(protocol) + '</span></td>' +
+            '<td title="' + escapeHtml(nodeName) + '">' + escapeHtml(nodeName) + '</td>' +
+            '<td>' + escapeHtml(protocol) + '</td>' +
             '<td>' + escapeHtml(formatRate(row.rate)) + '</td>' +
             '<td>' + escapeHtml(formatBytes(row.u)) + '</td>' +
             '<td>' + escapeHtml(formatBytes(row.d)) + '</td>' +
@@ -650,13 +576,17 @@
         table.dataset.bcNodeTrafficLoaded = ''
         table.dataset.bcNodeTrafficLoading = nodeTrafficPeriod
         table.dataset.bcNodeTrafficFailed = ''
-        setNodeTrafficLoading(table, '加载节点流量明细...')
+        if (!table.dataset.bcNodeTrafficHasRows) {
+          setNodeTrafficMessage(table, '加载中...')
+        } else {
+          setupNodeTrafficTable(table)
+        }
         var requestId = ++nodeTrafficRequestId
         var token = getAuthToken()
         if (!token) {
           if (nodeTrafficAuthRetry < 20) {
             nodeTrafficAuthRetry += 1
-            setNodeTrafficLoading(table, '正在等待当前登录态...')
+            if (!table.dataset.bcNodeTrafficHasRows) setNodeTrafficMessage(table, '正在等待当前登录态...')
             setTimeout(function () {
               if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
               table.dataset.bcNodeTrafficLoading = ''
@@ -667,7 +597,7 @@
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
           nodeTrafficLastFailedAt = Date.now()
-          setNodeTrafficLoading(table, '当前登录态读取失败，请刷新后重新登录')
+          if (!table.dataset.bcNodeTrafficHasRows) setNodeTrafficMessage(table, '当前登录态读取失败，请刷新后重新登录')
           return true
         }
         nodeTrafficAuthRetry = 0
@@ -678,19 +608,22 @@
           return response.json()
         }).then(function (payload) {
           if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
-          setNodeTrafficLoading(table, '加载节点流量明细...')
           renderNodeTrafficRows(table, payload || {})
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = ''
           table.dataset.bcNodeTrafficLoaded = nodeTrafficPeriod
+          table.dataset.bcNodeTrafficHasRows = '1'
           ensureTrafficToolbar(table)
           if (shouldScroll) table.scrollIntoView({ block: 'start', behavior: 'smooth' })
-        }).catch(function () {
+        }).catch(function (error) {
           if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
           nodeTrafficLastFailedAt = Date.now()
-          setNodeTrafficLoading(table, '节点流量明细加载失败，请刷新后重试；若刚登录，请切换一次按小时再切回按天')
+          if (window.console && console.warn) console.warn('[node-traffic] load failed', error)
+          if (!table.dataset.bcNodeTrafficHasRows) {
+            setNodeTrafficMessage(table, '节点流量明细加载失败，请刷新后重试')
+          }
         })
         return true
       }
