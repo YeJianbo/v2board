@@ -20,14 +20,22 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
             if(isset($record['context']['exception']) && is_object($record['context']['exception'])){
                 $record['context']['exception'] = (array)$record['context']['exception'];
             }
-            $record['request_data'] = request()->all() ??[];
+            $request = null;
+            if (app()->bound('request')) {
+                try {
+                    $request = app('request');
+                } catch (\Throwable $e) {
+                    $request = null;
+                }
+            }
+            $record['request_data'] = $request ? ($request->all() ?? []) : [];
             $log = [
                 'title' => $record['message'],
                 'level' => $record['level_name'],
-                'host' => $record['request_host'] ?? request()->getSchemeAndHttpHost(),
-                'uri' => $record['request_uri'] ?? request()->getRequestUri(),
-                'method' => $record['request_method'] ?? request()->getMethod(),
-                'ip' => request()->getClientIp(),
+                'host' => $record['request_host'] ?? ($request ? $request->getSchemeAndHttpHost() : ''),
+                'uri' => $record['request_uri'] ?? ($request ? $request->getRequestUri() : 'console'),
+                'method' => $record['request_method'] ?? ($request ? $request->getMethod() : 'CLI'),
+                'ip' => $request ? $request->getClientIp() : '',
                 'data' => json_encode($record['request_data']) ,
                 'context' => isset($record['context']) ? json_encode($record['context']) : '',
                 'created_at' => strtotime($record['datetime']),
