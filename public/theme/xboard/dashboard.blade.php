@@ -126,6 +126,27 @@
       color: var(--bc-text-soft);
       text-align: center;
     }
+    .bc-node-traffic-loading {
+      height: 112px;
+      text-align: center;
+    }
+    .bc-node-traffic-loading .n-data-table-td__content {
+      justify-content: center;
+    }
+    .bc-node-traffic-spinner {
+      display: inline-flex;
+      width: 26px;
+      height: 26px;
+      border: 2px solid rgba(24, 160, 88, .16);
+      border-top-color: var(--bc-primary);
+      border-radius: 999px;
+      animation: bc-node-traffic-spin .75s linear infinite;
+    }
+    @keyframes bc-node-traffic-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
     .bc-node-traffic-pill {
       display: inline-flex;
       align-items: center;
@@ -267,7 +288,7 @@
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
       var nodeTrafficPageSize = 10
-      var nodeTrafficPatchVersion = '20260628-stable-controls'
+      var nodeTrafficPatchVersion = '20260628-spinner-loading'
       var subscribeInfoCache = null
       var subscribeInfoLoading = null
       var titleCandidates = [
@@ -832,6 +853,16 @@
         removeNodeTrafficPagination(table)
       }
 
+      function setNodeTrafficLoading(table) {
+        var tbody = setupNodeTrafficTable(table)
+        var html = '<tr>' + renderNodeTrafficBodyCell(
+          '<span class="bc-node-traffic-spinner" aria-label="加载中"></span>',
+          { colspan: 8, extraClass: 'bc-node-traffic-loading', html: true }
+        ) + '</tr>'
+        if (tbody.innerHTML !== html) tbody.innerHTML = html
+        removeNodeTrafficPagination(table)
+      }
+
       function ensureNodeTrafficColgroup(table) {
         var colgroup = table.querySelector('colgroup')
         if (!colgroup) {
@@ -1063,17 +1094,13 @@
         table.dataset.bcNodeTrafficLoaded = ''
         table.dataset.bcNodeTrafficLoading = nodeTrafficPeriod
         table.dataset.bcNodeTrafficFailed = ''
-        if (!table.dataset.bcNodeTrafficHasRows) {
-          setNodeTrafficMessage(table, '加载中...')
-        } else {
-          setupNodeTrafficTable(table)
-        }
+        setNodeTrafficLoading(table)
         var requestId = ++nodeTrafficRequestId
         var token = getAuthToken()
         if (!token) {
           if (nodeTrafficAuthRetry < 20) {
             nodeTrafficAuthRetry += 1
-            if (!table.dataset.bcNodeTrafficHasRows) setNodeTrafficMessage(table, '正在等待当前登录态...')
+            setNodeTrafficLoading(table)
             setTimeout(function () {
               if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
               table.dataset.bcNodeTrafficLoading = ''
