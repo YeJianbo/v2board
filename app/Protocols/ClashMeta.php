@@ -22,8 +22,14 @@ class ClashMeta
         $servers = $this->servers;
         $user = $this->user;
         $appName = config('v2board.app_name', 'V2Board');
+        $appUrl = config('v2board.app_url');
         header("subscription-userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}");
         header('profile-update-interval: 24');
+        header('profile-title: base64:' . base64_encode($appName));
+        if ($appUrl) {
+            header('profile-web-page-url: ' . $appUrl);
+            header('support-url: ' . $appUrl);
+        }
         header("content-disposition:attachment;filename*=UTF-8''".rawurlencode($appName));
         $defaultConfig = base_path() . '/resources/rules/default.clash.yaml';
         $customConfig = base_path() . '/resources/rules/custom2.clash.yaml';
