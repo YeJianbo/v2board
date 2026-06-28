@@ -217,6 +217,8 @@
       var subscribeDataPromise = null
       var nodeTrafficPeriod = 'day'
       var nodeTrafficRequestId = 0
+      var capturedAuthToken = ''
+      var nodeTrafficAuthRetry = 0
       var titleCandidates = [
         '仪表盘',
         '使用文档',
@@ -232,6 +234,76 @@
       function textOf(node) {
         return (node && node.textContent ? node.textContent : '').replace(/\s+/g, '')
       }
+
+      function extractJwt(value) {
+        if (!value) return ''
+        var match = String(value).match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)
+        return match ? match[0] : ''
+      }
+
+      function rememberAuthToken(value) {
+        var jwt = extractJwt(value)
+        if (jwt) capturedAuthToken = jwt
+        return jwt
+      }
+
+      function captureAuthFromHeaders(headers) {
+        if (!headers) return ''
+        try {
+          if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+            return rememberAuthToken(headers.get('authorization') || headers.get('Authorization') || headers.get('auth_data') || '')
+          }
+          if (Array.isArray(headers)) {
+            for (var i = 0; i < headers.length; i += 1) {
+              if (!headers[i]) continue
+              var key = String(headers[i][0] || '').toLowerCase()
+              if (['authorization', 'auth_data', 'access_token'].indexOf(key) !== -1) {
+                var found = rememberAuthToken(headers[i][1])
+                if (found) return found
+              }
+            }
+          } else if (typeof headers === 'object') {
+            return rememberAuthToken(headers.Authorization || headers.authorization || headers.auth_data || headers.access_token || '')
+          }
+        } catch (error) {}
+        return ''
+      }
+
+      function installAuthCapture() {
+        if (window.__bcAuthCaptureInstalled) return
+        window.__bcAuthCaptureInstalled = true
+
+        var originalFetch = window.fetch
+        if (typeof originalFetch === 'function') {
+          window.fetch = function bcFetch(input, init) {
+            try {
+              if (typeof input === 'string') {
+                var url = new URL(input, window.location.origin)
+                rememberAuthToken(url.searchParams.get('auth_data'))
+              } else if (input && input.url) {
+                var requestUrl = new URL(input.url, window.location.origin)
+                rememberAuthToken(requestUrl.searchParams.get('auth_data'))
+                captureAuthFromHeaders(input.headers)
+              }
+              if (init) captureAuthFromHeaders(init.headers)
+            } catch (error) {}
+            return originalFetch.apply(this, arguments)
+          }
+        }
+
+        var xhrProto = window.XMLHttpRequest && window.XMLHttpRequest.prototype
+        if (xhrProto && xhrProto.setRequestHeader) {
+          var originalSetRequestHeader = xhrProto.setRequestHeader
+          xhrProto.setRequestHeader = function bcSetRequestHeader(name, value) {
+            if (['authorization', 'auth_data', 'access_token'].indexOf(String(name || '').toLowerCase()) !== -1) {
+              rememberAuthToken(value)
+            }
+            return originalSetRequestHeader.apply(this, arguments)
+          }
+        }
+      }
+
+      installAuthCapture()
 
       function findTrafficMenu() {
         var nodes = Array.prototype.slice.call(document.querySelectorAll('a, li, div, span'))
@@ -381,13 +453,12 @@
 
       function findTokenInValue(value) {
         if (!value) return ''
-        var jwt = String(value).match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)
-        if (jwt) return jwt[0]
+        var jwt = extractJwt(value)
+        if (jwt) return jwt
 
         try {
           var parsed = typeof value === 'string' ? JSON.parse(value) : value
           var stack = [parsed]
-          var fallbackToken = ''
           while (stack.length) {
             var item = stack.pop()
             if (!item || typeof item !== 'object') continue
@@ -395,12 +466,10 @@
               var child = item[key]
               var lower = key.toLowerCase()
               if (typeof child === 'string') {
-                var childJwt = child.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)
-                if (childJwt && !stack.token) stack.token = childJwt[0]
+                var childJwt = extractJwt(child)
+                if (childJwt && !stack.token) stack.token = childJwt
                 if (['auth_data', 'authorization', 'access_token', 'user_token'].indexOf(lower) !== -1 && child.length > 20 && !stack.token) {
-                  stack.token = child
-                } else if (lower === 'token' && child.length > 20 && !fallbackToken) {
-                  fallbackToken = child
+                  stack.token = extractJwt(child)
                 }
               } else if (child && typeof child === 'object') {
                 stack.push(child)
@@ -408,29 +477,25 @@
             })
             if (stack.token) return stack.token
           }
-          if (fallbackToken) return fallbackToken
         } catch (error) {}
 
         return ''
       }
 
       function getAuthToken() {
+        if (capturedAuthToken) return capturedAuthToken
         try {
           var urlToken = new URLSearchParams(window.location.search).get('auth_data')
-          if (urlToken) return urlToken
+          var urlJwt = rememberAuthToken(urlToken)
+          if (urlJwt) return urlJwt
         } catch (error) {}
         var stores = [window.localStorage, window.sessionStorage]
-        var priorityKeys = ['Vue_Naive_access_token', 'access_token', 'auth_data', 'authorization', 'token', 'user_token']
+        var priorityKeys = ['auth_data', 'authorization', 'access_token', 'user_token', 'Vue_Naive_access_token']
         for (var s = 0; s < stores.length; s += 1) {
           var store = stores[s]
           for (var p = 0; p < priorityKeys.length; p += 1) {
             var direct = findTokenInValue(store.getItem(priorityKeys[p]))
-            if (direct) return direct
-          }
-          for (var i = 0; i < store.length; i += 1) {
-            var key = store.key(i)
-            var token = findTokenInValue(store.getItem(key))
-            if (token) return token
+            if (direct) return rememberAuthToken(direct)
           }
         }
         return ''
@@ -515,6 +580,7 @@
             nodeTrafficPeriod = button.dataset.period || 'day'
             table.dataset.bcNodeTrafficLoaded = ''
             table.dataset.bcNodeTrafficFailed = ''
+            nodeTrafficAuthRetry = 0
             patchLegacyTrafficTable(false, true)
           })
         }
@@ -581,11 +647,22 @@
         var requestId = ++nodeTrafficRequestId
         var token = getAuthToken()
         if (!token) {
+          if (nodeTrafficAuthRetry < 20) {
+            nodeTrafficAuthRetry += 1
+            setNodeTrafficLoading(table, '正在等待当前登录态...')
+            setTimeout(function () {
+              if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
+              table.dataset.bcNodeTrafficLoading = ''
+              patchLegacyTrafficTable(false, true)
+            }, 250)
+            return true
+          }
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
-          setNodeTrafficLoading(table, '登录状态读取失败，请刷新后重新登录')
+          setNodeTrafficLoading(table, '当前登录态读取失败，请刷新后重新登录')
           return true
         }
+        nodeTrafficAuthRetry = 0
         fetch(buildNodeTrafficUrl(token), {
           headers: getNodeTrafficHeaders(token)
         }).then(function (response) {
@@ -604,7 +681,7 @@
           if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
-          setNodeTrafficLoading(table, '节点流量明细加载失败，请刷新后重试')
+          setNodeTrafficLoading(table, '节点流量明细加载失败，请刷新后重试；若刚登录，请切换一次按小时再切回按天')
         })
         return true
       }

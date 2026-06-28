@@ -29,6 +29,13 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
                 }
             }
             $record['request_data'] = $request ? ($request->all() ?? []) : [];
+            $datetime = $record['datetime'] ?? null;
+            $timestamp = $datetime instanceof \DateTimeInterface
+                ? $datetime->getTimestamp()
+                : strtotime((string)$datetime);
+            if (!$timestamp) {
+                $timestamp = time();
+            }
             $log = [
                 'title' => $record['message'],
                 'level' => $record['level_name'],
@@ -38,14 +45,14 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
                 'ip' => $request ? $request->getClientIp() : '',
                 'data' => json_encode($record['request_data']) ,
                 'context' => isset($record['context']) ? json_encode($record['context']) : '',
-                'created_at' => strtotime($record['datetime']),
-                'updated_at' => strtotime($record['datetime']),
+                'created_at' => $timestamp,
+                'updated_at' => $timestamp,
             ];
 
             LogModel::insert(
                 $log
             );
-        }catch (\Exception $e){
+        }catch (\Throwable $e){
             Log::channel('daily')->error($e->getMessage().$e->getFile().$e->getTraceAsString());
         }
     }
