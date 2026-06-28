@@ -20,6 +20,47 @@ use Illuminate\Support\Facades\DB;
 
 class ServerService
 {
+    private function serverStatus(string $serverType, array $serverIds): array
+    {
+        $serverType = strtoupper($serverType);
+        $serverIds = array_values(array_unique(array_filter($serverIds, function ($serverId) {
+            return $serverId !== null && $serverId !== '' && (int) $serverId > 0;
+        })));
+
+        $online = 0;
+        $lastCheckAt = 0;
+        $lastPushAt = 0;
+
+        foreach ($serverIds as $serverId) {
+            $online = max(
+                $online,
+                (int) Cache::get(CacheKey::get("SERVER_{$serverType}_ONLINE_USER", $serverId), 0)
+            );
+            $lastCheckAt = max(
+                $lastCheckAt,
+                (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_CHECK_AT", $serverId), 0)
+            );
+            $lastPushAt = max(
+                $lastPushAt,
+                (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_PUSH_AT", $serverId), 0)
+            );
+        }
+
+        return [
+            'online' => $online,
+            'last_check_at' => $lastCheckAt,
+            'last_push_at' => $lastPushAt
+        ];
+    }
+
+    private function serverStatusIds(array $server): array
+    {
+        return [
+            $server['id'] ?? null,
+            $server['parent_id'] ?? null
+        ];
+    }
+
     private function panelSetting(string $key, $default = null)
     {
         $configValue = config('v2board.' . $key);
@@ -267,9 +308,9 @@ class ServerService
                 $server['port'] = (int)$server['port'];
             }
             $serverType = strtoupper($server['type']);
-            $serverId = $server['parent_id'] ?? $server['id'];
-            $lastCheckAt = (int) ($server['last_check_at'] ?? 0);
-            $lastPushAt = (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_PUSH_AT", $serverId), 0);
+            $status = $this->serverStatus($serverType, $this->serverStatusIds($server));
+            $lastCheckAt = max((int) ($server['last_check_at'] ?? 0), $status['last_check_at']);
+            $lastPushAt = $status['last_push_at'];
             $server['last_check_at'] = $lastCheckAt;
             $server['last_push_at'] = $lastPushAt;
             $server['is_online'] = max($lastCheckAt, $lastPushAt) > 0 ? 1 : 0;
@@ -448,12 +489,12 @@ class ServerService
     {
         foreach ($servers as $k => $v) {
             $serverType = strtoupper($v['type']);
-            $serverId = $v['parent_id'] ?? $v['id'];
-            $online = Cache::get(CacheKey::get("SERVER_{$serverType}_ONLINE_USER", $serverId));
-            $lastCheckAt = (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_CHECK_AT", $serverId), 0);
-            $lastPushAt = (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_PUSH_AT", $serverId), 0);
+            $status = $this->serverStatus($serverType, $this->serverStatusIds($v));
+            $online = $status['online'];
+            $lastCheckAt = $status['last_check_at'];
+            $lastPushAt = $status['last_push_at'];
 
-            $servers[$k]['online'] = (int) ($online ?? 0);
+            $servers[$k]['online'] = (int) $online;
             $servers[$k]['last_check_at'] = $lastCheckAt;
             $servers[$k]['last_push_at'] = $lastPushAt;
             $lastActiveAt = max($lastCheckAt, $lastPushAt);

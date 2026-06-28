@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
 use App\Utils\Helper;
+use App\Utils\CacheKey;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class ServerController extends Controller
 {
@@ -99,6 +101,8 @@ class ServerController extends Controller
     // 后端获取配置
     public function config(Request $request)
     {
+        Cache::put(CacheKey::get('SERVER_V2NODE_LAST_CHECK_AT', $this->nodeInfo->id), time(), 3600);
+
         $response = [
             'listen_ip' => $this->nodeInfo->listen_ip,
             'server_port' => $this->nodeInfo->server_port,
