@@ -9,6 +9,7 @@ use App\Services\UserService;
 use App\Utils\CacheKey;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 /*
  * Tidal Lab Shadowsocks
@@ -16,13 +17,28 @@ use Illuminate\Support\Facades\Cache;
  */
 class ShadowsocksTidalabController extends Controller
 {
+    private function panelSetting(string $key, $default = null)
+    {
+        $configValue = config('v2board.' . $key);
+        if ($configValue !== null && $configValue !== '') {
+            return $configValue;
+        }
+
+        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        if ($dbValue !== null && $dbValue !== '') {
+            return $dbValue;
+        }
+
+        return $default;
+    }
+
     public function __construct(Request $request)
     {
         $token = $request->input('token');
         if (empty($token)) {
             abort(500, 'token is null');
         }
-        if ($token !== config('v2board.server_token')) {
+        if ($token !== $this->panelSetting('server_token', '')) {
             abort(500, 'token is error');
         }
     }

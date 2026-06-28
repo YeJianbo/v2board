@@ -19,13 +19,29 @@ use Illuminate\Support\Facades\Log;
 class DeepbworkController extends Controller
 {
     CONST V2RAY_CONFIG = '{"log":{"loglevel":"debug","access":"access.log","error":"error.log"},"api":{"services":["HandlerService","StatsService"],"tag":"api"},"dns":{},"stats":{},"inbounds":[{"port":443,"protocol":"vmess","settings":{"clients":[]},"sniffing":{"enabled":true,"destOverride":["http","tls"]},"streamSettings":{"network":"tcp"},"tag":"proxy"},{"listen":"127.0.0.1","port":23333,"protocol":"dokodemo-door","settings":{"address":"0.0.0.0"},"tag":"api"}],"outbounds":[{"protocol":"freedom","settings":{}},{"protocol":"blackhole","settings":{},"tag":"block"}],"routing":{"rules":[{"type":"field","inboundTag":"api","outboundTag":"api"}]},"policy":{"levels":{"0":{"handshake":4,"connIdle":300,"uplinkOnly":5,"downlinkOnly":30,"statsUserUplink":true,"statsUserDownlink":true}}}}';
+
+    private function panelSetting(string $key, $default = null)
+    {
+        $configValue = config('v2board.' . $key);
+        if ($configValue !== null && $configValue !== '') {
+            return $configValue;
+        }
+
+        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        if ($dbValue !== null && $dbValue !== '') {
+            return $dbValue;
+        }
+
+        return $default;
+    }
+
     public function __construct(Request $request)
     {
         $token = $request->input('token');
         if (empty($token)) {
             abort(500, 'token is null');
         }
-        if ($token !== config('v2board.server_token')) {
+        if ($token !== $this->panelSetting('server_token', '')) {
             abort(500, 'token is error');
         }
     }
@@ -115,6 +131,7 @@ class DeepbworkController extends Controller
         if (!$server) {
             abort(500, '节点不存在');
         }
+        Cache::put(CacheKey::get('SERVER_VMESS_LAST_CHECK_AT', $server->id), time(), 3600);
         $json = json_decode(self::V2RAY_CONFIG);
         $json->log->loglevel = (int)config('v2board.server_log_enable') ? 'debug' : 'none';
         $json->inbounds[1]->port = (int)$localPort;

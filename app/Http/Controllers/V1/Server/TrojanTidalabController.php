@@ -19,13 +19,29 @@ use Illuminate\Support\Facades\Log;
 class TrojanTidalabController extends Controller
 {
     CONST TROJAN_CONFIG = '{"run_type":"server","local_addr":"0.0.0.0","local_port":443,"remote_addr":"www.taobao.com","remote_port":80,"password":[],"ssl":{"cert":"server.crt","key":"server.key","sni":"domain.com"},"api":{"enabled":true,"api_addr":"127.0.0.1","api_port":10000}}';
+
+    private function panelSetting(string $key, $default = null)
+    {
+        $configValue = config('v2board.' . $key);
+        if ($configValue !== null && $configValue !== '') {
+            return $configValue;
+        }
+
+        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        if ($dbValue !== null && $dbValue !== '') {
+            return $dbValue;
+        }
+
+        return $default;
+    }
+
     public function __construct(Request $request)
     {
         $token = $request->input('token');
         if (empty($token)) {
             abort(500, 'token is null');
         }
-        if ($token !== config('v2board.server_token')) {
+        if ($token !== $this->panelSetting('server_token', '')) {
             abort(500, 'token is error');
         }
     }
@@ -111,6 +127,7 @@ class TrojanTidalabController extends Controller
         if (!$server) {
             abort(500, '节点不存在');
         }
+        Cache::put(CacheKey::get('SERVER_TROJAN_LAST_CHECK_AT', $server->id), time(), 3600);
 
         $json = json_decode(self::TROJAN_CONFIG);
         $json->local_port = $server->server_port;
