@@ -133,6 +133,11 @@
       color: var(--bc-primary-strong) !important;
       box-shadow: inset 3px 0 0 0 var(--bc-primary);
     }
+    html.bc-user-polish body.bc-node-traffic-open .n-menu-item-content--selected {
+      background: transparent !important;
+      color: var(--bc-text-soft) !important;
+      box-shadow: none !important;
+    }
     html.bc-user-polish .n-button {
       --n-border-radius: 8px !important;
       border-radius: 8px !important;
@@ -328,6 +333,17 @@
       var activeFrame = null
       var insertMenuTimer = 0
       var subscribeDataPromise = null
+      var titleCandidates = [
+        '仪表盘',
+        '使用文档',
+        '我的订单',
+        '我的邀请',
+        '购买订阅',
+        '节点状态',
+        '个人中心',
+        '我的工单',
+        '流量明细'
+      ]
 
       function textOf(node) {
         return (node && node.textContent ? node.textContent : '').replace(/\s+/g, '')
@@ -364,12 +380,49 @@
 
       function findTopTitle() {
         if (activeTitle && document.documentElement.contains(activeTitle)) return activeTitle
+        var layout = measureLayout()
         var nodes = Array.prototype.slice.call(document.querySelectorAll('a, div, span, h1, h2'))
-        return nodes.find(function (node) {
-          if (textOf(node) !== '流量明细') return false
+        return nodes.filter(function (node) {
+          var text = textOf(node)
+          if (titleCandidates.indexOf(text) === -1) return false
           var rect = node.getBoundingClientRect()
-          return rect.width > 0 && rect.height > 0 && rect.left > 220 && rect.top < 90
+          return rect.width > 0 &&
+            rect.height > 0 &&
+            rect.left >= layout.left - 8 &&
+            rect.left < layout.left + 380 &&
+            rect.top >= 0 &&
+            rect.top < layout.top + 8
+        }).sort(function (a, b) {
+          var ar = a.getBoundingClientRect()
+          var br = b.getBoundingClientRect()
+          return (ar.top - br.top) || (ar.left - br.left)
+        }).pop()
+      }
+
+      function syncMenuState(active) {
+        var menu = document.querySelector('.bc-node-traffic-menu')
+        if (menu) menu.classList.toggle('is-active', !!active)
+        document.body.classList.toggle('bc-node-traffic-open', !!active)
+        Array.prototype.slice.call(document.querySelectorAll('.n-menu-item-content--selected')).forEach(function (node) {
+          if (!node.dataset.bcWasSelected) node.dataset.bcWasSelected = '1'
         })
+        if (!active) {
+          Array.prototype.slice.call(document.querySelectorAll('[data-bc-was-selected]')).forEach(function (node) {
+            delete node.dataset.bcWasSelected
+          })
+        }
+      }
+
+      function keepNodeTrafficChrome() {
+        if (!nodeTrafficOpen) return
+        syncMenuState(true)
+        setTopTitleActive(true)
+      }
+
+      function scheduleChromeSync() {
+        setTimeout(keepNodeTrafficChrome, 30)
+        setTimeout(keepNodeTrafficChrome, 160)
+        setTimeout(keepNodeTrafficChrome, 500)
       }
 
       function setTopTitleActive(active) {
@@ -610,22 +663,20 @@
         var old = document.querySelector('.bc-node-traffic-frame-wrap')
         if (old) old.remove()
         activeFrame = null
-        document.body.classList.remove('bc-node-traffic-open')
-        var menu = document.querySelector('.bc-node-traffic-menu')
-        if (menu) menu.classList.remove('is-active')
+        syncMenuState(false)
         setTopTitleActive(false)
       }
 
       function renderFrame() {
         nodeTrafficOpen = true
-        var menu = document.querySelector('.bc-node-traffic-menu')
-        if (menu) menu.classList.add('is-active')
+        syncMenuState(true)
         setTopTitleActive(true)
-        setTimeout(function () { setTopTitleActive(true) }, 50)
+        scheduleChromeSync()
         var existing = document.querySelector('.bc-node-traffic-frame-wrap')
         if (existing) {
           updateFrameLayout()
           syncFrameAuth(existing.querySelector('iframe'))
+          scheduleChromeSync()
           return
         }
 
@@ -644,7 +695,8 @@
         activeFrame = frame
         updateFrameLayout()
         syncFrameAuth(frame, token)
-        document.body.classList.add('bc-node-traffic-open')
+        syncMenuState(true)
+        scheduleChromeSync()
       }
 
       function insertMenu() {
@@ -652,8 +704,9 @@
         if (existingMenu) {
           inserted = true
           if (nodeTrafficOpen) {
-            existingMenu.classList.add('is-active')
+            syncMenuState(true)
             updateFrameLayout()
+            scheduleChromeSync()
           }
           return
         }

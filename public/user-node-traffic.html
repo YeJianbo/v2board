@@ -7,22 +7,27 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f5f7fb;
-      --card: #fff;
-      --text: #111827;
-      --muted: #6b7280;
-      --line: #e5e7eb;
-      --primary: #0f766e;
-      --primary-soft: #e6fffb;
-      --danger: #b91c1c;
-      --shadow: 0 10px 30px rgba(15, 23, 42, .08);
+      --bg: #f5f3ef;
+      --card: #fbfaf6;
+      --card-soft: #f8f7f3;
+      --text: #2a2520;
+      --muted: #7a7470;
+      --line: rgba(42, 37, 32, .08);
+      --line-strong: rgba(42, 37, 32, .14);
+      --primary: #c94f2e;
+      --primary-strong: #a83d20;
+      --primary-soft: rgba(201, 79, 46, .08);
+      --danger: #c94f2e;
+      --shadow: 0 1px 3px rgba(42, 37, 32, .04), 0 4px 12px rgba(42, 37, 32, .03);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "Noto Sans SC", sans-serif;
+      font-family: Inter, "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
     .page {
       width: min(1180px, calc(100vw - 32px));
@@ -125,7 +130,7 @@
       padding: 12px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fafafa;
+      background: var(--card-soft);
     }
     .metric span {
       display: block;
@@ -150,7 +155,7 @@
       cursor: pointer;
     }
     .node-item:hover {
-      background: #f9fafb;
+      background: rgba(42, 37, 32, .025);
     }
     .node-name {
       display: flex;
@@ -165,7 +170,7 @@
       padding: 2px 7px;
       border-radius: 999px;
       background: var(--primary-soft);
-      color: #047857;
+      color: var(--primary-strong);
       font-size: 11px;
       text-transform: uppercase;
     }
@@ -192,7 +197,7 @@
     th {
       color: var(--muted);
       font-weight: 600;
-      background: #fafafa;
+      background: var(--card-soft);
     }
     .empty {
       padding: 42px 18px;
