@@ -126,6 +126,7 @@
       var capturedAuthToken = ''
       var nodeTrafficAuthRetry = 0
       var nodeTrafficLastFailedAt = 0
+      var nodeTrafficRenderCache = {}
       var titleCandidates = [
         '仪表盘',
         '使用文档',
@@ -333,6 +334,18 @@
         return !!findLegacyTrafficTable()
       }
 
+      function removeTrafficNotice() {
+        Array.prototype.slice.call(document.querySelectorAll('div, section')).forEach(function (node) {
+          if (node.dataset && node.dataset.bcTrafficNoticeRemoved) return
+          var text = textOf(node)
+          if (text.indexOf('流量明细仅保留近一个月数据以供查询') === -1) return
+          var rect = node.getBoundingClientRect()
+          if (!rect.width || !rect.height || rect.height > 140) return
+          node.dataset.bcTrafficNoticeRemoved = '1'
+          node.style.display = 'none'
+        })
+      }
+
       function syncMenuState(active) {
         Array.prototype.slice.call(document.querySelectorAll('.n-menu-item-content--selected')).forEach(function (node) {
           if (!node.dataset.bcWasSelected) node.dataset.bcWasSelected = '1'
@@ -533,12 +546,40 @@
         tbody.innerHTML = '<tr><td class="bc-node-traffic-empty" colspan="8">' + escapeHtml(message || '加载中...') + '</td></tr>'
       }
 
+      function cacheNodeTrafficTable(table) {
+        var thead = table.tHead
+        var tbody = table.tBodies[0]
+        if (!thead || !tbody) return
+        nodeTrafficRenderCache[nodeTrafficPeriod] = {
+          thead: thead.innerHTML,
+          tbody: tbody.innerHTML
+        }
+      }
+
+      function restoreNodeTrafficTable(table) {
+        var cache = nodeTrafficRenderCache[nodeTrafficPeriod]
+        if (!cache) return false
+        table.dataset.bcNodeTrafficTable = '1'
+        table.classList.add('bc-node-traffic-legacy-table')
+        var thead = table.tHead || table.createTHead()
+        var tbody = table.tBodies[0] || table.createTBody()
+        thead.innerHTML = cache.thead
+        tbody.innerHTML = cache.tbody
+        table.dataset.bcNodeTrafficLoaded = nodeTrafficPeriod
+        table.dataset.bcNodeTrafficLoading = ''
+        table.dataset.bcNodeTrafficFailed = ''
+        table.dataset.bcNodeTrafficHasRows = '1'
+        ensureTrafficToolbar(table)
+        return true
+      }
+
       function renderNodeTrafficRows(table, payload) {
         var rows = payload && Array.isArray(payload.data) ? payload.data : []
         var meta = payload && payload.meta ? payload.meta : {}
         var tbody = setupNodeTrafficTable(table)
         if (!rows.length) {
           tbody.innerHTML = '<tr><td class="bc-node-traffic-empty" colspan="8">' + escapeHtml(meta.note || '暂无节点维度流量数据') + '</td></tr>'
+          cacheNodeTrafficTable(table)
           return
         }
         tbody.innerHTML = rows.map(function (row) {
@@ -556,6 +597,7 @@
             '<td>' + escapeHtml(formatBytes(row.cost)) + '</td>' +
             '</tr>'
         }).join('')
+        cacheNodeTrafficTable(table)
       }
 
       function patchLegacyTrafficTable(shouldScroll, forceReload) {
@@ -563,7 +605,12 @@
         if (!table) return false
         syncMenuState(true)
         setTopTitleActive(true)
+        removeTrafficNotice()
         ensureTrafficToolbar(table)
+        if (restoreNodeTrafficTable(table) && !forceReload) {
+          if (shouldScroll) table.scrollIntoView({ block: 'start', behavior: 'smooth' })
+          return true
+        }
         if (table.dataset.bcNodeTrafficLoaded === nodeTrafficPeriod && !forceReload) {
           return true
         }
@@ -597,7 +644,7 @@
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
           nodeTrafficLastFailedAt = Date.now()
-          if (!table.dataset.bcNodeTrafficHasRows) setNodeTrafficMessage(table, '当前登录态读取失败，请刷新后重新登录')
+          if (!restoreNodeTrafficTable(table) && !table.dataset.bcNodeTrafficHasRows) setNodeTrafficMessage(table, '暂无节点维度流量数据')
           return true
         }
         nodeTrafficAuthRetry = 0
@@ -621,8 +668,8 @@
           table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
           nodeTrafficLastFailedAt = Date.now()
           if (window.console && console.warn) console.warn('[node-traffic] load failed', error)
-          if (!table.dataset.bcNodeTrafficHasRows) {
-            setNodeTrafficMessage(table, '节点流量明细加载失败，请刷新后重试')
+          if (!restoreNodeTrafficTable(table) && !table.dataset.bcNodeTrafficHasRows) {
+            setNodeTrafficMessage(table, '暂无节点维度流量数据')
           }
         })
         return true
