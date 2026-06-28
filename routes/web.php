@@ -58,11 +58,19 @@ $adminViewData = function () {
 };
 
 Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))), function () use ($adminViewData) {
-    return view('admin', $adminViewData());
+    return response()
+        ->view('admin', $adminViewData())
+        ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        ->header('Pragma', 'no-cache')
+        ->header('Expires', '0');
 });
 
 Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))) . '/{any}', function () use ($adminViewData) {
-    return view('admin', $adminViewData());
+    return response()
+        ->view('admin', $adminViewData())
+        ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        ->header('Pragma', 'no-cache')
+        ->header('Expires', '0');
 })->where('any', '.*');
 
 if (!empty(config('v2board.subscribe_path'))) {

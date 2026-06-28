@@ -2,10 +2,10 @@
 window.routerBase = 'http://127.0.0.1:8000/'
 window.settings = {
   // 站点名称
-  title: 'Xboard',
+  title: 'BunCloud',
   // 站点描述
-  description: 'Xboard',
-  assets_path: '/assets',
+  description: 'BunCloud',
+  assets_path: '/theme/xboard/assets',
   // 主题色
   theme: {
     color: 'default', //可选default、blue、black、、darkblue
