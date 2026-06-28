@@ -676,18 +676,29 @@
 
         nodeTrafficOpen = true
         syncMenuState(true)
+        var legacyRoot = findLegacyTrafficRoot()
         var existing = document.querySelector('.bc-node-traffic-frame-wrap')
         if (existing) {
-          scheduleChromeSync()
-          updateFrameLayout()
-          syncFrameAuth(existing.querySelector('iframe'))
-          scheduleChromeSync()
-          if (shouldScroll) existing.scrollIntoView({ block: 'start', behavior: 'smooth' })
-          return
+          if (legacyRoot && !legacyRoot.contains(existing)) {
+            existing.remove()
+            if (activeHost) activeHost.classList.remove('bc-node-traffic-content-host')
+            activeFrame = null
+            activeHost = null
+          } else {
+            scheduleChromeSync()
+            updateFrameLayout()
+            syncFrameAuth(existing.querySelector('iframe'))
+            scheduleChromeSync()
+            if (shouldScroll) existing.scrollIntoView({ block: 'start', behavior: 'smooth' })
+            return
+          }
         }
 
+        if (legacyRoot) {
+          activeHost = legacyRoot
+        }
         var token = primeFrameAuth()
-        var host = findContentHost()
+        var host = legacyRoot || findContentHost()
         scheduleChromeSync()
         var wrap = document.createElement('div')
         wrap.className = 'bc-node-traffic-frame-wrap'
@@ -703,9 +714,15 @@
         })
         wrap.appendChild(head)
         wrap.appendChild(frame)
-        host.appendChild(wrap)
-        if (host !== document.body && host.id !== 'app') {
-          host.classList.add('bc-node-traffic-content-host')
+        if (legacyRoot && host && host !== document.body && host.id !== 'app') {
+          host.innerHTML = ''
+          host.appendChild(wrap)
+          host.classList.remove('bc-node-traffic-content-host')
+        } else {
+          host.appendChild(wrap)
+          if (host !== document.body && host.id !== 'app') {
+            host.classList.add('bc-node-traffic-content-host')
+          }
         }
         activeHost = host
         activeFrame = frame
