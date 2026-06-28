@@ -48,14 +48,13 @@ dns:
     fake-ip-range: '198.18.0.1/16'
     fake-ip-filter-mode: 'blacklist'
     prefer-h3: false
-    respect-rules: false
+    respect-rules: true
     use-hosts: true
     use-system-hosts: false
     fake-ip-filter:
       - '*.lan'
       - '*.local'
       - '*.arpa'
-      - 'time.*.com'
       - 'ntp.*.com'
       - 'time.*.com'
       - '+.market.xiaomi.com'
@@ -64,9 +63,8 @@ dns:
       - 'www.msftconnecttest.com'
     default-nameserver:
       - '223.6.6.6'
-      - '8.8.8.8'
+      - '119.29.29.29'
     nameserver:
-      - '8.8.8.8'
       - 'https://doh.pub/dns-query'
       - 'https://dns.alidns.com/dns-query'
     direct-nameserver-follow-policy: false
@@ -117,6 +115,7 @@ proxy-groups:
   - { name: "💬 微信消息", type: select, proxies: ["🎯 全球直连", "🚀 节点选择", /^(?!剩余|套餐|距离).*/] }
 #   - { name: "☁️ CloudFlare", type: select, proxies: ["🚀 节点选择", "🎯 全球直连", "🛫 机场订阅", /^(?!剩余|套餐|距离).*/] }
   - { name: "🧑‍💻 GitHub", type: select, proxies: ["🚀 节点选择", "🎯 全球直连", /^(?!剩余|套餐|距离).*/] }
+  - { name: "🧰 开发环境", type: select, proxies: ["🚀 节点选择", "🎯 全球直连", "🧑‍💻 GitHub", /^(?!剩余|套餐|距离).*/] }
   - { name: "🐻 BunCloud", type: select, proxies: ["🚀 节点选择", "🎯 全球直连", /^(?!剩余|套餐|距离).*/] }
   - { name: "🎯 全球直连", type: select, proxies:[DIRECT, /nbhnkjnj/]}
   - { name: "🛑 全球拦截", type: select, proxies:[REJECT, DIRECT, /nbhnkjnj/]}
@@ -289,6 +288,95 @@ rules:
  - RULE-SET,BanEasyList,🆎 AdBlock
  - RULE-SET,BanEasyListChina,🆎 AdBlock
  - RULE-SET,BanEasyPrivacy,🆎 AdBlock
+ # 开发环境 / 包管理器：可在“🧰 开发环境”里切换直连或代理
+ - DOMAIN-SUFFIX,python.org,🧰 开发环境
+ - DOMAIN-SUFFIX,pypi.org,🧰 开发环境
+ - DOMAIN-SUFFIX,pythonhosted.org,🧰 开发环境
+ - DOMAIN-SUFFIX,files.pythonhosted.org,🧰 开发环境
+ - DOMAIN-SUFFIX,pypa.io,🧰 开发环境
+ - DOMAIN-SUFFIX,pip.pypa.io,🧰 开发环境
+ - DOMAIN-SUFFIX,python-poetry.org,🧰 开发环境
+ - DOMAIN-SUFFIX,poetry.eustace.io,🧰 开发环境
+ - DOMAIN-SUFFIX,anaconda.com,🧰 开发环境
+ - DOMAIN-SUFFIX,anaconda.org,🧰 开发环境
+ - DOMAIN-SUFFIX,repo.anaconda.com,🧰 开发环境
+ - DOMAIN-SUFFIX,conda.anaconda.org,🧰 开发环境
+ - DOMAIN-SUFFIX,conda.io,🧰 开发环境
+ - DOMAIN-SUFFIX,conda-forge.org,🧰 开发环境
+ - DOMAIN-SUFFIX,mamba.pm,🧰 开发环境
+ - DOMAIN-SUFFIX,prefix.dev,🧰 开发环境
+ - DOMAIN-SUFFIX,nodejs.org,🧰 开发环境
+ - DOMAIN-SUFFIX,npmjs.org,🧰 开发环境
+ - DOMAIN-SUFFIX,npmjs.com,🧰 开发环境
+ - DOMAIN-SUFFIX,npmjs.net,🧰 开发环境
+ - DOMAIN-SUFFIX,yarnpkg.com,🧰 开发环境
+ - DOMAIN-SUFFIX,pnpm.io,🧰 开发环境
+ - DOMAIN-SUFFIX,unpkg.com,🧰 开发环境
+ - DOMAIN-SUFFIX,jsdelivr.net,🧰 开发环境
+ - DOMAIN-SUFFIX,docker.com,🧰 开发环境
+ - DOMAIN-SUFFIX,docker.io,🧰 开发环境
+ - DOMAIN-SUFFIX,dockerhub.com,🧰 开发环境
+ - DOMAIN-SUFFIX,registry-1.docker.io,🧰 开发环境
+ - DOMAIN-SUFFIX,production.cloudflare.docker.com,🧰 开发环境
+ - DOMAIN-SUFFIX,quay.io,🧰 开发环境
+ - DOMAIN-SUFFIX,gcr.io,🧰 开发环境
+ - DOMAIN-SUFFIX,k8s.gcr.io,🧰 开发环境
+ - DOMAIN-SUFFIX,pkg.dev,🧰 开发环境
+ - DOMAIN-SUFFIX,gitlab.com,🧰 开发环境
+ - DOMAIN-SUFFIX,gitlab.io,🧰 开发环境
+ - DOMAIN-SUFFIX,bitbucket.org,🧰 开发环境
+ - DOMAIN-SUFFIX,atlassian.com,🧰 开发环境
+ - DOMAIN-SUFFIX,apache.org,🧰 开发环境
+ - DOMAIN-SUFFIX,maven.org,🧰 开发环境
+ - DOMAIN-SUFFIX,repo.maven.apache.org,🧰 开发环境
+ - DOMAIN-SUFFIX,plugins.gradle.org,🧰 开发环境
+ - DOMAIN-SUFFIX,gradle.org,🧰 开发环境
+ - DOMAIN-SUFFIX,sonatype.org,🧰 开发环境
+ - DOMAIN-SUFFIX,mvnrepository.com,🧰 开发环境
+ - DOMAIN-SUFFIX,go.dev,🧰 开发环境
+ - DOMAIN-SUFFIX,golang.org,🧰 开发环境
+ - DOMAIN-SUFFIX,proxy.golang.org,🧰 开发环境
+ - DOMAIN-SUFFIX,sum.golang.org,🧰 开发环境
+ - DOMAIN-SUFFIX,rust-lang.org,🧰 开发环境
+ - DOMAIN-SUFFIX,rustup.rs,🧰 开发环境
+ - DOMAIN-SUFFIX,crates.io,🧰 开发环境
+ - DOMAIN-SUFFIX,static.crates.io,🧰 开发环境
+ - DOMAIN-SUFFIX,composer.org,🧰 开发环境
+ - DOMAIN-SUFFIX,getcomposer.org,🧰 开发环境
+ - DOMAIN-SUFFIX,packagist.org,🧰 开发环境
+ - DOMAIN-SUFFIX,rubygems.org,🧰 开发环境
+ - DOMAIN-SUFFIX,ruby-lang.org,🧰 开发环境
+ - DOMAIN-SUFFIX,nuget.org,🧰 开发环境
+ - DOMAIN-SUFFIX,myget.org,🧰 开发环境
+ - DOMAIN-SUFFIX,jetbrains.com,🧰 开发环境
+ - DOMAIN-SUFFIX,code.visualstudio.com,🧰 开发环境
+ - DOMAIN-SUFFIX,visualstudio.com,🧰 开发环境
+ - DOMAIN-SUFFIX,vscode-cdn.net,🧰 开发环境
+ - DOMAIN-SUFFIX,marketplace.visualstudio.com,🧰 开发环境
+ - DOMAIN-SUFFIX,readthedocs.io,🧰 开发环境
+ - DOMAIN-SUFFIX,readthedocs.org,🧰 开发环境
+ - DOMAIN-SUFFIX,terraform.io,🧰 开发环境
+ - DOMAIN-SUFFIX,hashicorp.com,🧰 开发环境
+ - DOMAIN-SUFFIX,registry.terraform.io,🧰 开发环境
+ - DOMAIN-SUFFIX,ubuntu.com,🧰 开发环境
+ - DOMAIN-SUFFIX,debian.org,🧰 开发环境
+ - DOMAIN-SUFFIX,launchpad.net,🧰 开发环境
+ - DOMAIN-SUFFIX,archlinux.org,🧰 开发环境
+ - DOMAIN-SUFFIX,fedoraproject.org,🧰 开发环境
+ - DOMAIN-SUFFIX,centos.org,🧰 开发环境
+ - DOMAIN-SUFFIX,rockylinux.org,🧰 开发环境
+ - DOMAIN-SUFFIX,almalinux.org,🧰 开发环境
+ - DOMAIN-SUFFIX,brew.sh,🧰 开发环境
+ - DOMAIN-SUFFIX,homebrew.org,🧰 开发环境
+ - PROCESS-NAME,pip.exe,🧰 开发环境
+ - PROCESS-NAME,pip3.exe,🧰 开发环境
+ - PROCESS-NAME,conda.exe,🧰 开发环境
+ - PROCESS-NAME,mamba.exe,🧰 开发环境
+ - PROCESS-NAME,npm.exe,🧰 开发环境
+ - PROCESS-NAME,pnpm.exe,🧰 开发环境
+ - PROCESS-NAME,yarn.exe,🧰 开发环境
+ - PROCESS-NAME,docker.exe,🧰 开发环境
+ - PROCESS-NAME,git.exe,🧰 开发环境
  - DOMAIN-SUFFIX,xn--ngstr-lra8j.com,🚀 节点选择
  - DOMAIN-SUFFIX,services.googleapis.cn,🚀 节点选择
  #微信（借用bilibili分流）
@@ -8345,6 +8433,7 @@ rules:
  - DOMAIN-SUFFIX,cdninstagram.com,🚀 节点选择
  - DOMAIN-SUFFIX,instagram.com,🚀 节点选择
  - DOMAIN-SUFFIX,instagr.am,🚀 节点选择
+ - DOMAIN-SUFFIX,krill-ai.com,🚀 节点选择
  - DOMAIN-SUFFIX,kakao.com,🚀 节点选择
  - DOMAIN-SUFFIX,kakao.co.kr,🚀 节点选择
  - DOMAIN-SUFFIX,kakaocdn.net,🚀 节点选择
@@ -8491,6 +8580,7 @@ rules:
  - DOMAIN-SUFFIX,oppo.com,🎯 全球直连
  - DOMAIN-SUFFIX,realme.com,🎯 全球直连
  - DOMAIN-SUFFIX,vivo.com,🎯 全球直连
+ - DOMAIN-SUFFIX,seetacloud.com,🎯 全球直连
  - PROCESS-NAME,WeChatAppEx.exe,DIRECT
  - PROCESS-NAME,WeChat.exe,DIRECT
  - PROCESS-NAME,Steam.exe,DIRECT
