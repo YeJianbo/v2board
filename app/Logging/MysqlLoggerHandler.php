@@ -11,6 +11,9 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
     private const TEXT_LIMIT = 16000;
     private const MAX_DEPTH = 6;
     private const MAX_ITEMS = 100;
+    private const FAILURE_COOLDOWN_SECONDS = 60;
+
+    private static int $disabledUntil = 0;
 
     private const SENSITIVE_KEYS = [
         'auth_data',
@@ -45,6 +48,10 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
 
     protected function write(array $record): void
     {
+        if (self::$disabledUntil > time()) {
+            return;
+        }
+
         try{
             if (isset($record['context']['exception']) && $record['context']['exception'] instanceof \Throwable) {
                 $record['context']['exception'] = $this->sanitizeThrowable($record['context']['exception']);
@@ -85,8 +92,10 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
                 $log
             );
         } catch (\Throwable $e) {
+            self::$disabledUntil = time() + self::FAILURE_COOLDOWN_SECONDS;
             error_log(sprintf(
-                'MysqlLoggerHandler failed: %s in %s:%d',
+                'MysqlLoggerHandler disabled for %d seconds after failure: %s in %s:%d',
+                self::FAILURE_COOLDOWN_SECONDS,
                 $e->getMessage(),
                 $e->getFile(),
                 $e->getLine()
