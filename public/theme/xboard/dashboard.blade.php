@@ -233,8 +233,7 @@
       }
 
       function ensureNodeTrafficInline(attempt, shouldScroll) {
-        var title = findTopTitle()
-        if (title && textOf(title) === '流量明细') {
+        if (isTrafficDetailPage()) {
           renderFrame(!!shouldScroll)
           return
         }
@@ -266,6 +265,44 @@
           var br = b.getBoundingClientRect()
           return (ar.top - br.top) || (ar.left - br.left)
         }).pop()
+      }
+
+      function findLegacyTrafficTable() {
+        var tables = Array.prototype.slice.call(document.querySelectorAll('table'))
+        return tables.find(function (table) {
+          if (table.closest && table.closest('.bc-node-traffic-frame-wrap')) return false
+          var text = textOf(table)
+          return text.indexOf('记录时间') !== -1 &&
+            text.indexOf('实际上行') !== -1 &&
+            text.indexOf('实际下行') !== -1 &&
+            text.indexOf('扣费倍率') !== -1
+        }) || null
+      }
+
+      function findLegacyTrafficRoot() {
+        var table = findLegacyTrafficTable()
+        if (!table) return null
+        var layout = measureLayout()
+        var current = table.parentElement
+        var best = null
+        for (var i = 0; current && current !== document.body && i < 10; i += 1) {
+          var rect = current.getBoundingClientRect()
+          if (rect.width >= 420 &&
+            rect.height >= 220 &&
+            rect.left >= layout.left - 24 &&
+            rect.top >= layout.top - 36 &&
+            !(current.closest && current.closest('aside, nav'))) {
+            best = current
+          }
+          current = current.parentElement
+        }
+        return best
+      }
+
+      function isTrafficDetailPage() {
+        var title = findTopTitle()
+        if (title && textOf(title).indexOf('流量明细') !== -1) return true
+        return !!findLegacyTrafficTable()
       }
 
       function syncMenuState(active) {
@@ -564,6 +601,12 @@
       function findContentHost() {
         if (activeHost && document.documentElement.contains(activeHost)) return activeHost
 
+        var legacyRoot = findLegacyTrafficRoot()
+        if (legacyRoot) {
+          activeHost = legacyRoot
+          return activeHost
+        }
+
         var pageRoot = findPageRootFromTitle()
         if (pageRoot) {
           activeHost = pageRoot
@@ -626,7 +669,7 @@
 
       function renderFrame(shouldScroll) {
         var title = findTopTitle()
-        if (!title || textOf(title) !== '流量明细') {
+        if (!isTrafficDetailPage()) {
           syncMenuState(false)
           return
         }

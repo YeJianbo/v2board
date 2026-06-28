@@ -223,6 +223,8 @@ class UniProxyController extends Controller
     // 后端获取配置
     public function config(Request $request)
     {
+        Cache::put(CacheKey::get('SERVER_' . strtoupper($this->nodeType) . '_LAST_CHECK_AT', $this->nodeInfo->id), time(), 3600);
+
         switch ($this->nodeType) {
             case 'shadowsocks':
                 $response = [
