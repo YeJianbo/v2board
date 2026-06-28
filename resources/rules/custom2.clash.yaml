@@ -13,14 +13,13 @@ dns:
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter-mode: blacklist
   prefer-h3: false
-  respect-rules: false
+  respect-rules: true
   use-hosts: true
   use-system-hosts: false
   fake-ip-filter:
   - '*.lan'
   - '*.local'
   - '*.arpa'
-  - time.*.com
   - ntp.*.com
   - time.*.com
   - +.market.xiaomi.com
@@ -35,10 +34,61 @@ dns:
   - https://doh.pub/dns-query
   - https://dns.alidns.com/dns-query
   fallback:
-  - https://dns.alidns.com/dns-query
   - https://dns.google/dns-query
   - https://cloudflare-dns.com/dns-query
-  nameserver-policy: {}
+  - https://dns.quad9.net/dns-query
+  nameserver-policy:
+    +.cn:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+    +.中国:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+    +.google.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.googleapis.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.gstatic.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.youtube.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.github.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.githubusercontent.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.githubassets.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.openai.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.chatgpt.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.docker.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.docker.io:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.pypi.org:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.pythonhosted.org:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.anaconda.com:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+    +.anaconda.org:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
   proxy-server-nameserver:
   - https://doh.pub/dns-query
   - https://dns.alidns.com/dns-query
@@ -80,7 +130,7 @@ tun:
   auto-detect-interface: true
   dns-hijack:
   - any:53
-  mtu: 9000
+  mtu: 1500
   enable: true
 external-controller-cors:
   allow-private-network: true
