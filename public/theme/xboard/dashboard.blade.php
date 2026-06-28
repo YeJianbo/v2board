@@ -58,7 +58,7 @@
       align-items: center;
       justify-content: flex-end;
       gap: 6px;
-      margin: 0 0 12px;
+      margin: 0 0 10px;
       padding: 0;
       background: transparent;
       box-shadow: none;
@@ -75,6 +75,7 @@
     .bc-node-traffic-periods button {
       min-width: 58px;
       height: 32px;
+      box-sizing: border-box;
       padding: 0 14px;
       border: 1px solid var(--bc-line-strong);
       border-radius: 6px;
@@ -159,13 +160,16 @@
       align-items: center;
       justify-content: flex-end;
       gap: 6px;
-      margin: 12px 0 0;
+      min-height: 32px;
+      margin: 10px 0 0;
       color: var(--bc-text-soft);
       font-size: 13px;
+      line-height: 32px;
     }
     .bc-node-traffic-pagination button {
       min-width: 32px;
       height: 32px;
+      box-sizing: border-box;
       padding: 0 10px;
       border: 1px solid var(--bc-line-strong);
       border-radius: 6px;
@@ -175,6 +179,7 @@
       line-height: 30px;
       cursor: pointer;
       transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+      vertical-align: top;
     }
     .bc-node-traffic-pagination button:hover:not(:disabled):not(.is-active),
     .bc-node-traffic-pagination button:focus-visible:not(:disabled):not(.is-active) {
@@ -200,10 +205,12 @@
     }
     .bc-node-traffic-page-info {
       margin-right: 8px;
+      line-height: 32px;
       white-space: nowrap;
     }
     .bc-node-traffic-page-gap {
       min-width: 18px;
+      line-height: 32px;
       text-align: center;
       color: var(--bc-text-soft);
     }
@@ -260,7 +267,7 @@
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
       var nodeTrafficPageSize = 10
-      var nodeTrafficPatchVersion = '20260628-protocol-labels'
+      var nodeTrafficPatchVersion = '20260628-controls-outside'
       var subscribeInfoCache = null
       var subscribeInfoLoading = null
       var titleCandidates = [
@@ -763,16 +770,16 @@
       }
 
       function ensureTrafficToolbar(table) {
-        var parent = table.parentElement
-        if (!parent) return null
-        var toolbar = Array.prototype.slice.call(parent.children).find(function (child) {
+        var placement = getNodeTrafficControlPlacement(table)
+        if (!placement.host) return null
+        var toolbar = Array.prototype.slice.call(placement.host.children).find(function (child) {
           return child.classList && child.classList.contains('bc-node-traffic-table-toolbar')
         })
         if (!toolbar) {
           toolbar = document.createElement('div')
           toolbar.className = 'bc-node-traffic-table-toolbar'
           toolbar.innerHTML = '<div class="bc-node-traffic-periods"><button type="button" data-period="day">按天</button><button type="button" data-period="hour">按小时</button><button type="button" data-period="minute">按分钟</button></div>'
-          parent.insertBefore(toolbar, table)
+          placement.host.insertBefore(toolbar, placement.frame || table)
           toolbar.addEventListener('click', function (event) {
             var button = event.target && event.target.closest ? event.target.closest('button[data-period]') : null
             if (!button) return
@@ -788,6 +795,15 @@
           button.classList.toggle('is-active', button.dataset.period === nodeTrafficPeriod)
         })
         return toolbar
+      }
+
+      function getNodeTrafficControlPlacement(table) {
+        if (!table) return { host: null, frame: null }
+        var frame = table.closest ? table.closest('.n-data-table') : null
+        if (!frame) frame = table.closest ? table.closest('.n-data-table-wrapper') : null
+        if (!frame) frame = table.parentElement
+        var host = frame && frame.parentElement ? frame.parentElement : table.parentElement
+        return { host: host, frame: frame }
       }
 
       function setupNodeTrafficTable(table) {
@@ -875,10 +891,12 @@
       }
 
       function removeNodeTrafficPagination(table) {
-        var parent = table && table.parentElement
-        if (!parent) return
-        Array.prototype.slice.call(parent.children).forEach(function (node) {
-          if (node.classList && node.classList.contains('bc-node-traffic-pagination')) node.remove()
+        if (!table) return
+        var placement = getNodeTrafficControlPlacement(table)
+        var host = placement.host || table.parentElement
+        if (!host) return
+        Array.prototype.slice.call(host.querySelectorAll('.bc-node-traffic-pagination')).forEach(function (node) {
+          node.remove()
         })
       }
 
@@ -895,21 +913,21 @@
       }
 
       function renderNodeTrafficPagination(table, totalRows, totalPages, currentPage) {
-        var parent = table.parentElement
-        if (!parent) return
+        var placement = getNodeTrafficControlPlacement(table)
+        if (!placement.host) return
         if (totalRows <= nodeTrafficPageSize) {
           removeNodeTrafficPagination(table)
           return
         }
 
-        var pagination = Array.prototype.slice.call(parent.children).find(function (node) {
+        var pagination = Array.prototype.slice.call(placement.host.children).find(function (node) {
           return node.classList && node.classList.contains('bc-node-traffic-pagination')
         })
         if (!pagination) {
           pagination = document.createElement('div')
           pagination.className = 'bc-node-traffic-pagination'
-          if (table.nextSibling) parent.insertBefore(pagination, table.nextSibling)
-          else parent.appendChild(pagination)
+          if (placement.frame && placement.frame.nextSibling) placement.host.insertBefore(pagination, placement.frame.nextSibling)
+          else placement.host.appendChild(pagination)
           pagination.addEventListener('click', function (event) {
             var button = event.target && event.target.closest ? event.target.closest('button[data-page], button[data-page-action]') : null
             if (!button || button.disabled) return
