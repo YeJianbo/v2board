@@ -508,7 +508,6 @@
           insertMenuTimer = 0
           removeLegacyNodeTrafficMenu()
           ensureNodeTrafficInline(0, false)
-          patchSubscribeImports()
         }, 80)
       }
 
@@ -694,54 +693,6 @@
           setNodeTrafficLoading(table, '节点流量明细加载失败，请刷新后重试；若刚登录，请切换一次按小时再切回按天')
         })
         return true
-      }
-
-      function findSubscribePanel() {
-        var nodes = Array.prototype.slice.call(document.querySelectorAll('div, section, article'))
-        var matches = nodes.filter(function (node) {
-          var text = textOf(node)
-          return text.indexOf('复制订阅地址') !== -1 && text.indexOf('扫描二维码订阅') !== -1
-        }).sort(function (a, b) {
-          var ar = a.getBoundingClientRect()
-          var br = b.getBoundingClientRect()
-          return (ar.width * ar.height) - (br.width * br.height)
-        })
-        return matches.find(function (node) {
-          var rect = node.getBoundingClientRect()
-          return rect.width >= 220 && rect.height >= 120 && rect.width <= 560
-        }) || null
-      }
-
-      function patchSubscribeImports() {
-        var panel = findSubscribePanel()
-        if (!panel) return
-        Array.prototype.slice.call(panel.querySelectorAll('.bc-sub-import-row, [data-bc-import-id]')).forEach(function (node) {
-          node.remove()
-        })
-        var clashNodes = Array.prototype.slice.call(panel.querySelectorAll('div, span, p, a, button')).filter(function (node) {
-          var text = textOf(node)
-          return text === '导入到Clash' || text === '导入到ClashVergeRev'
-        })
-        clashNodes.forEach(function (node) {
-          var text = textOf(node)
-          if (text === '导入到Clash') {
-            node.textContent = node.textContent.replace('Clash', 'Clash Verge Rev')
-          }
-        })
-        var clashRow = clashNodes[0]
-        for (var i = 0; clashRow && i < 5; i += 1) {
-          var rowText = textOf(clashRow)
-          var rect = clashRow.getBoundingClientRect()
-          if (rowText.indexOf('导入到Clash') !== -1 && rect.width >= 180 && rect.height >= 36) break
-          clashRow = clashRow.parentElement
-        }
-        if (clashRow) {
-          var icon = clashRow.querySelector('img')
-          if (icon && icon.src && icon.src.indexOf('clash-verge-rev') === -1) {
-            icon.src = '/theme/xboard/assets/images/clash-verge-rev.png'
-            icon.alt = 'Clash Verge Rev'
-          }
-        }
       }
 
       function measureLayout() {
