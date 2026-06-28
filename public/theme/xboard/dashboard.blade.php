@@ -95,6 +95,10 @@
       width: 100%;
       table-layout: auto;
     }
+    table.bc-node-traffic-legacy-table th:nth-child(1) .n-data-table-th__title,
+    table.bc-node-traffic-legacy-table td:nth-child(1) .n-data-table-td__content {
+      white-space: nowrap;
+    }
     table.bc-node-traffic-legacy-table th:nth-child(2) .n-data-table-th__title,
     table.bc-node-traffic-legacy-table td:nth-child(2) .n-data-table-td__content {
       min-width: 180px;
@@ -107,6 +111,33 @@
     .bc-node-traffic-empty {
       color: var(--bc-text-soft);
       text-align: center;
+    }
+    .bc-node-traffic-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 48px;
+      height: 24px;
+      padding: 0 10px;
+      border: 1px solid rgba(31, 34, 37, .12);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--bc-text);
+      font-size: 12px;
+      line-height: 22px;
+      white-space: nowrap;
+      box-shadow: 0 1px 1px rgba(31, 34, 37, .02);
+    }
+    .bc-node-traffic-pill--protocol {
+      color: var(--bc-primary);
+      border-color: var(--bc-primary-border);
+      background: rgba(24, 160, 88, .04);
+    }
+    .bc-node-traffic-pill--rate {
+      min-width: 60px;
+      color: var(--bc-text);
+      border-color: rgba(31, 34, 37, .13);
+      background: #fff;
     }
     .bc-node-traffic-pagination {
       display: flex;
@@ -525,7 +556,7 @@
       function formatRate(value) {
         var rate = Number(value)
         if (!isFinite(rate)) return '-'
-        return rate.toFixed(rate % 1 === 0 ? 0 : 2) + 'x'
+        return rate.toFixed(2) + ' x'
       }
 
       function formatProtocol(row) {
@@ -608,14 +639,14 @@
           table.insertBefore(colgroup, table.firstChild)
         }
         colgroup.innerHTML = [
-          '112px',
-          '260px',
-          '108px',
-          '72px',
-          '120px',
-          '120px',
-          '120px',
-          '120px'
+          '124px',
+          '250px',
+          '96px',
+          '86px',
+          '104px',
+          '104px',
+          '104px',
+          '104px'
         ].map(function (width) {
           return '<col style="width: ' + width + ';">'
         }).join('')
@@ -636,9 +667,16 @@
         var attrs = ' class="' + classes.join(' ') + '"'
         if (opts.colspan) attrs += ' colspan="' + Number(opts.colspan) + '"'
         if (opts.title) attrs += ' title="' + escapeHtml(opts.title) + '"'
+        var content = opts.html ? String(value == null ? '' : value) : escapeHtml(value)
         return '<td' + attrs + '>' +
-          '<div class="n-data-table-td__content">' + escapeHtml(value) + '</div>' +
+          '<div class="n-data-table-td__content">' + content + '</div>' +
           '</td>'
+      }
+
+      function renderNodeTrafficPill(value, type) {
+        return '<span class="bc-node-traffic-pill bc-node-traffic-pill--' + escapeHtml(type || 'default') + '">' +
+          escapeHtml(value) +
+          '</span>'
       }
 
       function getNodeTrafficPage() {
@@ -769,8 +807,8 @@
           return '<tr>' +
             renderNodeTrafficBodyCell(formatTrafficTime(row.record_at, nodeTrafficPeriod)) +
             renderNodeTrafficBodyCell(nodeName, { title: nodeName }) +
-            renderNodeTrafficBodyCell(protocol) +
-            renderNodeTrafficBodyCell(formatRate(row.rate)) +
+            renderNodeTrafficBodyCell(renderNodeTrafficPill(protocol, 'protocol'), { html: true }) +
+            renderNodeTrafficBodyCell(renderNodeTrafficPill(formatRate(row.rate), 'rate'), { html: true }) +
             renderNodeTrafficBodyCell(formatBytes(row.u)) +
             renderNodeTrafficBodyCell(formatBytes(row.d)) +
             renderNodeTrafficBodyCell(formatBytes(row.total || (Number(row.u || 0) + Number(row.d || 0)))) +
