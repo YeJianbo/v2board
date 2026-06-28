@@ -66,15 +66,16 @@
     .bc-node-traffic-frame-wrap {
       display: block;
       width: 100%;
-      min-height: calc(100vh - 74px);
-      background: var(--bc-bg);
+      min-height: calc(100vh - 96px);
+      padding: 0;
+      background: transparent;
       overflow: hidden;
     }
     .bc-node-traffic-frame {
       width: 100%;
-      min-height: calc(100vh - 74px);
+      min-height: calc(100vh - 96px);
       border: 0;
-      background: var(--bc-bg);
+      background: transparent;
     }
     .bc-node-traffic-content-host.bc-node-traffic-content-host > :not(.bc-node-traffic-frame-wrap) {
       display: none !important;
@@ -199,8 +200,48 @@
         target.textContent = text
       }
 
+      function resetClonedMenuState(node) {
+        var statePattern = /(^|[-_])(selected|active|open|current)([-_]|$)/
+        Array.prototype.slice.call(node.querySelectorAll('*')).concat([node]).forEach(function (item) {
+          Array.prototype.slice.call(item.classList || []).forEach(function (className) {
+            if (statePattern.test(className)) item.classList.remove(className)
+          })
+          item.removeAttribute('aria-current')
+          item.removeAttribute('aria-selected')
+          item.removeAttribute('data-active')
+          item.removeAttribute('data-selected')
+        })
+      }
+
       function openNodeTraffic() {
-        renderFrame()
+        closeNodeTraffic()
+
+        var traffic = findTrafficMenu()
+        var root = traffic ? clickableRoot(traffic) : null
+        if (root && !root.classList.contains('bc-node-traffic-menu')) {
+          root.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          }))
+        }
+
+        waitForTrafficPage(0)
+      }
+
+      function waitForTrafficPage(attempt) {
+        var title = findTopTitle()
+        if (title && textOf(title) === '流量明细') {
+          renderFrame()
+          return
+        }
+        if (attempt >= 8) {
+          renderFrame()
+          return
+        }
+        setTimeout(function () {
+          waitForTrafficPage(attempt + 1)
+        }, 120)
       }
 
       function findTopTitle() {
@@ -496,12 +537,39 @@
         return best
       }
 
+      function findLargestContentRoot() {
+        var layout = measureLayout()
+        var nodes = Array.prototype.slice.call(document.body.querySelectorAll('#app > *, .n-layout-content, main, [class*="content"], [class*="page"]'))
+        var candidates = nodes.filter(function (node) {
+          if (node.classList && node.classList.contains('bc-node-traffic-frame-wrap')) return false
+          if (node.closest && node.closest('aside, nav')) return false
+          var rect = node.getBoundingClientRect()
+          if (!rect.width || !rect.height) return false
+          return rect.left >= layout.left - 20 &&
+            rect.top >= layout.top - 36 &&
+            rect.width >= Math.min(520, window.innerWidth - layout.left - 32) &&
+            rect.height >= 180
+        }).sort(function (a, b) {
+          var ar = a.getBoundingClientRect()
+          var br = b.getBoundingClientRect()
+          return (br.width * br.height) - (ar.width * ar.height)
+        })
+
+        return candidates[0] || null
+      }
+
       function findContentHost() {
         if (activeHost && document.documentElement.contains(activeHost)) return activeHost
 
         var pageRoot = findPageRootFromTitle()
         if (pageRoot) {
           activeHost = pageRoot
+          return activeHost
+        }
+
+        var largestRoot = findLargestContentRoot()
+        if (largestRoot) {
+          activeHost = largestRoot
           return activeHost
         }
 
@@ -609,6 +677,7 @@
 
         var root = clickableRoot(traffic)
         var item = root.cloneNode(true)
+        resetClonedMenuState(item)
         item.classList.add('bc-node-traffic-menu')
         item.removeAttribute('aria-current')
         item.removeAttribute('data-v-traffic-menu')

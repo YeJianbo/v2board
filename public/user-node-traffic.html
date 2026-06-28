@@ -218,24 +218,26 @@
     html.embedded .page {
       width: 100%;
       margin: 0;
-      padding: 18px 22px 30px;
+      padding: 0 0 30px;
     }
     html.embedded .topbar {
-      justify-content: flex-end;
-      margin-bottom: 12px;
-    }
-    html.embedded .topbar > div:first-child {
-      display: none;
+      align-items: center;
+      margin-bottom: 16px;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--card);
+      box-shadow: var(--shadow);
     }
     html.embedded .toolbar {
       margin-left: auto;
     }
     html.embedded .grid {
-      grid-template-columns: minmax(0, 1fr) 280px;
-      gap: 14px;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 16px;
     }
     html.embedded .card {
-      box-shadow: none;
+      box-shadow: var(--shadow);
     }
     html.embedded .chart-wrap {
       padding: 14px 18px 18px;
@@ -251,10 +253,12 @@
     }
     @media (max-width: 900px) {
       html.embedded .page {
-        padding: 18px 14px 28px;
+        padding: 0 0 28px;
       }
       html.embedded .topbar {
         justify-content: flex-start;
+        align-items: flex-start;
+        padding: 16px;
       }
       html.embedded .grid {
         grid-template-columns: 1fr;
