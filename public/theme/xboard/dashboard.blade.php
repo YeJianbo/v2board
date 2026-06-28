@@ -219,6 +219,20 @@
       font-weight: 600;
       line-height: 1;
     }
+    .bc-subscribe-import-row {
+      border-radius: 6px;
+      transition: background-color .15s ease, color .15s ease;
+    }
+    .bc-subscribe-import-row:hover,
+    .bc-subscribe-import-row:focus-visible {
+      background: var(--bc-primary-soft);
+      outline: none;
+    }
+    .bc-subscribe-import-row:hover .bc-subscribe-client-badge,
+    .bc-subscribe-import-row:focus-visible .bc-subscribe-client-badge {
+      background: var(--bc-primary);
+      color: #fff;
+    }
     @media (max-width: 768px) {
       .bc-node-traffic-periods {
         width: 100%;
@@ -617,7 +631,7 @@
         item.className = 'n-list-item p-0!'
         item.dataset.bcSubscribeImport = client
         item.innerHTML = '<div class="n-list-item__main">' +
-          '<div class="flex cursor-pointer items-center p-2.5">' +
+          '<div class="bc-subscribe-import-row flex cursor-pointer items-center p-2.5" role="button" tabindex="0">' +
           '<div class="w-16 flex justify-center"><span class="bc-subscribe-client-badge">' + escapeHtml(badge || label.charAt(0)) + '</span></div>' +
           '<div class="text-gray-500">导入到 ' + escapeHtml(label) + '</div>' +
           '</div>' +
@@ -625,7 +639,23 @@
         item.addEventListener('click', function () {
           openSubscribeClient(client)
         })
+        item.addEventListener('keydown', function (event) {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          openSubscribeClient(client)
+        })
         return item
+      }
+
+      function normalizeSubscribeClientLabels(list) {
+        Array.prototype.slice.call(list.querySelectorAll('.n-list-item')).forEach(function (item) {
+          if (textOf(item).indexOf('ClashVergeRev') === -1) return
+          var walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT)
+          var textNode
+          while ((textNode = walker.nextNode())) {
+            textNode.nodeValue = textNode.nodeValue.replace(/ClashVergeRev/g, 'Clash Verge Rev')
+          }
+        })
       }
 
       function patchSubscribeModal() {
@@ -633,6 +663,7 @@
         lists.forEach(function (list) {
           var text = textOf(list)
           if (text.indexOf('复制订阅地址') === -1 || text.indexOf('ClashVergeRev') === -1) return
+          normalizeSubscribeClientLabels(list)
           if (!list.querySelector('[data-bc-subscribe-import="nekobox"]')) {
             var hiddify = Array.prototype.slice.call(list.querySelectorAll('.n-list-item')).find(function (item) {
               return textOf(item).indexOf('Hiddify') !== -1
