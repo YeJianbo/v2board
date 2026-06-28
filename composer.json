@@ -45,7 +45,10 @@
     },
     "extra": {
         "laravel": {
-            "dont-discover": []
+            "dont-discover": [
+                "facade/ignition",
+                "nunomaduro/collision"
+            ]
         }
     },
     "autoload": {
