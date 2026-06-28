@@ -66,19 +66,52 @@
     .bc-node-traffic-frame-wrap {
       display: block;
       width: 100%;
-      min-height: calc(100vh - 96px);
+      margin-top: 18px;
+      min-height: 540px;
       padding: 0;
       background: transparent;
       overflow: hidden;
     }
+    .bc-node-traffic-inline-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding: 16px 18px;
+      border: 1px solid var(--bc-line);
+      border-radius: 8px;
+      background: var(--bc-panel);
+      box-shadow: var(--bc-shadow-sm);
+    }
+    .bc-node-traffic-inline-title {
+      margin: 0;
+      color: var(--bc-text);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .bc-node-traffic-inline-desc {
+      margin: 4px 0 0;
+      color: var(--bc-text-soft);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .bc-node-traffic-close {
+      flex: 0 0 auto;
+      height: 32px;
+      padding: 0 12px;
+      border: 1px solid var(--bc-line-strong);
+      border-radius: 6px;
+      background: var(--bc-panel);
+      color: var(--bc-text);
+      cursor: pointer;
+    }
     .bc-node-traffic-frame {
       width: 100%;
-      min-height: calc(100vh - 96px);
+      min-height: 520px;
       border: 0;
       background: transparent;
-    }
-    .bc-node-traffic-content-host.bc-node-traffic-content-host > :not(.bc-node-traffic-frame-wrap) {
-      display: none !important;
     }
     body.bc-node-traffic-open {
       overflow: auto;
@@ -236,7 +269,7 @@
           return
         }
         if (attempt >= 8) {
-          renderFrame()
+          syncMenuState(false)
           return
         }
         setTimeout(function () {
@@ -282,7 +315,6 @@
       function keepNodeTrafficChrome() {
         if (!nodeTrafficOpen) return
         syncMenuState(true)
-        setTopTitleActive(true)
       }
 
       function scheduleChromeSync() {
@@ -363,8 +395,10 @@
         }, 80)
       }
 
-      function buildFrameUrl() {
-        return pageUrl + '?embed=1'
+      function buildFrameUrl(token) {
+        var url = pageUrl + '?embed=1&inline=1'
+        if (token) url += '&auth_data=' + encodeURIComponent(token)
+        return url
       }
 
       function primeFrameAuth() {
@@ -615,7 +649,6 @@
         if (activeHost) activeHost.classList.remove('bc-node-traffic-content-host')
         activeHost = null
         syncMenuState(false)
-        setTopTitleActive(false)
       }
 
       function handleRouteChange() {
@@ -623,33 +656,49 @@
       }
 
       function renderFrame() {
+        var title = findTopTitle()
+        if (!title || textOf(title) !== '流量明细') {
+          syncMenuState(false)
+          return
+        }
+
         nodeTrafficOpen = true
         syncMenuState(true)
         var existing = document.querySelector('.bc-node-traffic-frame-wrap')
         if (existing) {
-          setTopTitleActive(true)
           scheduleChromeSync()
           updateFrameLayout()
           syncFrameAuth(existing.querySelector('iframe'))
           scheduleChromeSync()
+          existing.scrollIntoView({ block: 'start', behavior: 'smooth' })
           return
         }
 
         var token = primeFrameAuth()
         var host = findContentHost()
-        setTopTitleActive(true)
         scheduleChromeSync()
         var wrap = document.createElement('div')
         wrap.className = 'bc-node-traffic-frame-wrap'
+        var head = document.createElement('div')
+        head.className = 'bc-node-traffic-inline-head'
+        head.innerHTML = '<div><h2 class="bc-node-traffic-inline-title">节点流量明细</h2><p class="bc-node-traffic-inline-desc">按节点查看个人用量、协议、扣费和时间曲线。</p></div>'
+        var closeButton = document.createElement('button')
+        closeButton.className = 'bc-node-traffic-close'
+        closeButton.type = 'button'
+        closeButton.textContent = '收起'
+        closeButton.addEventListener('click', function () {
+          closeNodeTraffic()
+        })
+        head.appendChild(closeButton)
         var frame = document.createElement('iframe')
         frame.className = 'bc-node-traffic-frame'
-        frame.src = buildFrameUrl()
+        frame.src = buildFrameUrl(token)
         frame.title = menuText
         frame.addEventListener('load', function () {
           syncFrameAuth(frame, token)
         })
+        wrap.appendChild(head)
         wrap.appendChild(frame)
-        host.classList.add('bc-node-traffic-content-host')
         host.appendChild(wrap)
         activeHost = host
         activeFrame = frame
@@ -657,6 +706,7 @@
         syncFrameAuth(frame, token)
         syncMenuState(true)
         scheduleChromeSync()
+        wrap.scrollIntoView({ block: 'start', behavior: 'smooth' })
       }
 
       function insertMenu() {

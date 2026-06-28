@@ -268,23 +268,40 @@ class StatController extends Controller
         })->values();
 
         if ($includeTotal) {
-            $totalPoints = collect($labels)->map(function ($labelMeta) use ($series) {
-                $u = 0;
-                $d = 0;
-                $cost = 0;
-                foreach ($series as $item) {
-                    $point = collect($item['points'])->firstWhere('timestamp', $labelMeta['timestamp']);
-                    $u += (int) ($point['u'] ?? 0);
-                    $d += (int) ($point['d'] ?? 0);
-                    $cost += (float) ($point['cost'] ?? 0);
-                }
-                return [
+            $totalPointMap = [];
+            foreach ($labels as $labelMeta) {
+                $totalPointMap[$labelMeta['timestamp']] = [
                     'timestamp' => $labelMeta['timestamp'],
                     'label' => $labelMeta['label'],
-                    'u' => $u,
-                    'd' => $d,
-                    'total' => $u + $d,
-                    'cost' => $cost,
+                    'u' => 0,
+                    'd' => 0,
+                    'total' => 0,
+                    'cost' => 0,
+                ];
+            }
+
+            foreach ($series as $item) {
+                foreach ($item['points'] as $point) {
+                    $timestamp = (int) ($point['timestamp'] ?? 0);
+                    if (!isset($totalPointMap[$timestamp])) {
+                        continue;
+                    }
+
+                    $totalPointMap[$timestamp]['u'] += (int) ($point['u'] ?? 0);
+                    $totalPointMap[$timestamp]['d'] += (int) ($point['d'] ?? 0);
+                    $totalPointMap[$timestamp]['total'] += (int) ($point['total'] ?? 0);
+                    $totalPointMap[$timestamp]['cost'] += (float) ($point['cost'] ?? 0);
+                }
+            }
+
+            $totalPoints = collect($totalPointMap)->sortBy('timestamp')->map(function ($point) {
+                return [
+                    'timestamp' => $point['timestamp'],
+                    'label' => $point['label'],
+                    'u' => $point['u'],
+                    'd' => $point['d'],
+                    'total' => $point['total'],
+                    'cost' => $point['cost'],
                 ];
             })->values();
 

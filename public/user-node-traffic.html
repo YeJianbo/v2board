@@ -251,6 +251,9 @@
     html.embedded .node-list {
       max-height: 500px;
     }
+    html.embedded.inline .topbar {
+      display: none;
+    }
     @media (max-width: 900px) {
       html.embedded .page {
         padding: 0 0 28px;
@@ -268,8 +271,12 @@
 </head>
 <body>
   <script>
-    if (new URLSearchParams(location.search).get('embed') === '1') {
+    const initialParams = new URLSearchParams(location.search);
+    if (initialParams.get('embed') === '1') {
       document.documentElement.classList.add('embedded')
+    }
+    if (initialParams.get('inline') === '1') {
+      document.documentElement.classList.add('inline')
     }
   </script>
   <main class="page">
@@ -342,6 +349,7 @@
       loading: false,
       pendingLoad: false,
       requestSeq: 0,
+      resizeTimer: 0,
     };
 
     const isEmbedded = new URLSearchParams(location.search).get('embed') === '1';
@@ -653,7 +661,10 @@
       renderNodes(summary);
       renderAll();
     });
-    window.addEventListener('resize', renderAll);
+    window.addEventListener('resize', () => {
+      window.clearTimeout(state.resizeTimer);
+      state.resizeTimer = window.setTimeout(renderAll, 120);
+    });
     window.addEventListener('message', (event) => {
       if (event.origin !== window.location.origin) return;
       if (!event.data || event.data.type !== 'bc-node-traffic-auth') return;
