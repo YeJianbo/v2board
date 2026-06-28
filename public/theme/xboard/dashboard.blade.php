@@ -63,6 +63,56 @@
       background: transparent;
       box-shadow: none;
     }
+    .bc-node-traffic-range {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .bc-node-traffic-range input {
+      width: 162px;
+      height: 32px;
+      box-sizing: border-box;
+      padding: 0 9px;
+      border: 1px solid var(--bc-line-strong);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--bc-text);
+      font-size: 12px;
+      line-height: 30px;
+      outline: none;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .bc-node-traffic-range input:hover,
+    .bc-node-traffic-range input:focus {
+      border-color: var(--bc-primary-border);
+      box-shadow: 0 0 0 2px var(--bc-primary-soft);
+    }
+    .bc-node-traffic-range span {
+      color: var(--bc-text-soft);
+      font-size: 12px;
+    }
+    .bc-node-traffic-range button {
+      height: 32px;
+      box-sizing: border-box;
+      padding: 0 12px;
+      border: 1px solid var(--bc-line-strong);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--bc-text-soft);
+      font-size: 12px;
+      line-height: 30px;
+      cursor: pointer;
+      transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+    }
+    .bc-node-traffic-range button:hover,
+    .bc-node-traffic-range button:focus-visible {
+      border-color: var(--bc-primary-border);
+      background: var(--bc-primary-soft);
+      color: var(--bc-primary);
+      outline: none;
+    }
     .bc-node-traffic-periods {
       display: inline-flex;
       align-items: center;
@@ -267,9 +317,20 @@
       color: #fff;
     }
     @media (max-width: 768px) {
+      .bc-node-traffic-table-toolbar {
+        align-items: flex-end;
+        flex-direction: column;
+      }
       .bc-node-traffic-periods {
         width: 100%;
         justify-content: flex-end;
+      }
+      .bc-node-traffic-range {
+        width: 100%;
+      }
+      .bc-node-traffic-range input {
+        flex: 1 1 150px;
+        min-width: 0;
       }
       .bc-node-traffic-pagination {
         justify-content: flex-start;
@@ -293,7 +354,9 @@
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
       var nodeTrafficPageSize = 10
-      var nodeTrafficPatchVersion = '20260628-spinner-stable'
+      var nodeTrafficStartAt = ''
+      var nodeTrafficEndAt = ''
+      var nodeTrafficPatchVersion = '20260628-traffic-range-filter'
       var subscribeInfoCache = null
       var subscribeInfoLoading = null
       var titleCandidates = [
@@ -620,6 +683,10 @@
 
       function buildNodeTrafficUrl() {
         var url = '/api/v1/user/stat/getNodeTrafficLog?period=' + encodeURIComponent(nodeTrafficPeriod) + '&include_total=1'
+        var startAt = getNodeTrafficTimestamp(nodeTrafficStartAt)
+        var endAt = getNodeTrafficTimestamp(nodeTrafficEndAt)
+        if (startAt) url += '&start_at=' + encodeURIComponent(startAt)
+        if (endAt) url += '&end_at=' + encodeURIComponent(endAt)
         return url
       }
 
@@ -765,6 +832,40 @@
         return isFinite(rate) ? rate : 1
       }
 
+      function getNodeTrafficCacheKey() {
+        return [nodeTrafficPeriod, nodeTrafficStartAt || '', nodeTrafficEndAt || ''].join('|')
+      }
+
+      function getNodeTrafficTimestamp(value) {
+        if (!value) return 0
+        var parsed = Date.parse(String(value))
+        if (!isFinite(parsed)) return 0
+        return Math.floor(parsed / 1000)
+      }
+
+      function updateNodeTrafficRangeFromToolbar(toolbar) {
+        var startInput = toolbar.querySelector('input[data-range="start"]')
+        var endInput = toolbar.querySelector('input[data-range="end"]')
+        nodeTrafficStartAt = startInput ? String(startInput.value || '') : ''
+        nodeTrafficEndAt = endInput ? String(endInput.value || '') : ''
+      }
+
+      function syncTrafficRangeInputs(toolbar) {
+        var startInput = toolbar.querySelector('input[data-range="start"]')
+        var endInput = toolbar.querySelector('input[data-range="end"]')
+        if (startInput && startInput.value !== nodeTrafficStartAt) startInput.value = nodeTrafficStartAt
+        if (endInput && endInput.value !== nodeTrafficEndAt) endInput.value = nodeTrafficEndAt
+      }
+
+      function reloadNodeTrafficTable(table) {
+        nodeTrafficPageMap[getNodeTrafficCacheKey()] = 1
+        table.dataset.bcNodeTrafficLoaded = ''
+        table.dataset.bcNodeTrafficLoading = ''
+        table.dataset.bcNodeTrafficFailed = ''
+        nodeTrafficAuthRetry = 0
+        patchLegacyTrafficTable(false, true)
+      }
+
       function getNodeTrafficTotal(row) {
         var total = Number(row.total)
         if (isFinite(total) && total >= 0) return total
@@ -820,22 +921,46 @@
         if (!toolbar) {
           toolbar = document.createElement('div')
           toolbar.className = 'bc-node-traffic-table-toolbar'
-          toolbar.innerHTML = '<div class="bc-node-traffic-periods"><button type="button" data-period="day">按天</button><button type="button" data-period="hour">按小时</button><button type="button" data-period="minute">按分钟</button></div>'
+          toolbar.innerHTML = '<div class="bc-node-traffic-periods"><button type="button" data-period="day">按天</button><button type="button" data-period="hour">按小时</button><button type="button" data-period="minute">按分钟</button></div>' +
+            '<div class="bc-node-traffic-range">' +
+            '<input type="datetime-local" data-range="start" aria-label="开始时间">' +
+            '<span>至</span>' +
+            '<input type="datetime-local" data-range="end" aria-label="结束时间">' +
+            '<button type="button" data-range-action="apply">查询</button>' +
+            '<button type="button" data-range-action="reset">重置</button>' +
+            '</div>'
           placement.host.insertBefore(toolbar, placement.frame || table)
           toolbar.addEventListener('click', function (event) {
-            var button = event.target && event.target.closest ? event.target.closest('button[data-period]') : null
-            if (!button) return
-            nodeTrafficPeriod = button.dataset.period || 'day'
-            nodeTrafficPageMap[nodeTrafficPeriod] = 1
-            table.dataset.bcNodeTrafficLoaded = ''
-            table.dataset.bcNodeTrafficFailed = ''
-            nodeTrafficAuthRetry = 0
-            patchLegacyTrafficTable(false, true)
+            var periodButton = event.target && event.target.closest ? event.target.closest('button[data-period]') : null
+            if (periodButton) {
+              nodeTrafficPeriod = periodButton.dataset.period || 'day'
+              reloadNodeTrafficTable(table)
+              return
+            }
+            var rangeButton = event.target && event.target.closest ? event.target.closest('button[data-range-action]') : null
+            if (!rangeButton) return
+            if (rangeButton.dataset.rangeAction === 'reset') {
+              nodeTrafficStartAt = ''
+              nodeTrafficEndAt = ''
+              syncTrafficRangeInputs(toolbar)
+            } else {
+              updateNodeTrafficRangeFromToolbar(toolbar)
+            }
+            reloadNodeTrafficTable(table)
+          })
+          toolbar.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter') return
+            var input = event.target && event.target.closest ? event.target.closest('input[data-range]') : null
+            if (!input) return
+            event.preventDefault()
+            updateNodeTrafficRangeFromToolbar(toolbar)
+            reloadNodeTrafficTable(table)
           })
         }
         Array.prototype.slice.call(toolbar.querySelectorAll('button[data-period]')).forEach(function (button) {
           button.classList.toggle('is-active', button.dataset.period === nodeTrafficPeriod)
         })
+        syncTrafficRangeInputs(toolbar)
         return toolbar
       }
 
@@ -933,14 +1058,14 @@
       }
 
       function getNodeTrafficPage() {
-        var page = Number(nodeTrafficPageMap[nodeTrafficPeriod] || 1)
+        var page = Number(nodeTrafficPageMap[getNodeTrafficCacheKey()] || 1)
         return isFinite(page) && page > 0 ? Math.floor(page) : 1
       }
 
       function setNodeTrafficPage(page, totalPages) {
         var maxPage = Math.max(1, Number(totalPages || 1))
         var nextPage = Math.max(1, Math.min(maxPage, Math.floor(Number(page || 1))))
-        nodeTrafficPageMap[nodeTrafficPeriod] = nextPage
+        nodeTrafficPageMap[getNodeTrafficCacheKey()] = nextPage
         return nextPage
       }
 
@@ -990,7 +1115,7 @@
             else if (button.dataset.pageAction === 'next') targetPage += 1
             else targetPage = Number(button.dataset.page || targetPage)
             setNodeTrafficPage(targetPage, Number(pagination.dataset.totalPages || 1))
-            var payload = nodeTrafficPayloadCache[nodeTrafficPeriod]
+            var payload = nodeTrafficPayloadCache[getNodeTrafficCacheKey()]
             if (payload) renderNodeTrafficRows(table, payload, { fromCache: true })
           })
         }
@@ -1011,7 +1136,7 @@
         var thead = table.tHead
         var tbody = table.tBodies[0]
         if (!thead || !tbody) return
-        nodeTrafficRenderCache[nodeTrafficPeriod] = {
+        nodeTrafficRenderCache[getNodeTrafficCacheKey()] = {
           version: nodeTrafficPatchVersion,
           thead: thead.innerHTML,
           tbody: tbody.innerHTML,
@@ -1020,7 +1145,7 @@
       }
 
       function restoreNodeTrafficTable(table) {
-        var cache = nodeTrafficRenderCache[nodeTrafficPeriod]
+        var cache = nodeTrafficRenderCache[getNodeTrafficCacheKey()]
         if (!cache) return false
         if (cache.version !== nodeTrafficPatchVersion) return false
         table.dataset.bcNodeTrafficTable = '1'
@@ -1030,7 +1155,7 @@
         var tbody = table.tBodies[0] || table.createTBody()
         if (thead.innerHTML !== cache.thead) thead.innerHTML = cache.thead
         if (tbody.innerHTML !== cache.tbody) tbody.innerHTML = cache.tbody
-        table.dataset.bcNodeTrafficLoaded = nodeTrafficPeriod
+        table.dataset.bcNodeTrafficLoaded = getNodeTrafficCacheKey()
         table.dataset.bcNodeTrafficLoading = ''
         table.dataset.bcNodeTrafficFailed = ''
         table.dataset.bcNodeTrafficHasRows = '1'
@@ -1045,7 +1170,7 @@
 
       function renderNodeTrafficRows(table, payload, options) {
         var opts = options || {}
-        if (!opts.fromCache) nodeTrafficPayloadCache[nodeTrafficPeriod] = payload || {}
+        if (!opts.fromCache) nodeTrafficPayloadCache[getNodeTrafficCacheKey()] = payload || {}
         var rows = payload && Array.isArray(payload.data) ? payload.data : []
         var meta = payload && payload.meta ? payload.meta : {}
         var tbody = setupNodeTrafficTable(table)
@@ -1099,13 +1224,14 @@
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = ''
         }
-        if (table.dataset.bcNodeTrafficLoaded === nodeTrafficPeriod && !forceReload) {
+        var cacheKey = getNodeTrafficCacheKey()
+        if (table.dataset.bcNodeTrafficLoaded === cacheKey && !forceReload) {
           return true
         }
-        if (table.dataset.bcNodeTrafficLoading === nodeTrafficPeriod && !forceReload) {
+        if (table.dataset.bcNodeTrafficLoading === cacheKey && !forceReload) {
           return true
         }
-        if (table.dataset.bcNodeTrafficFailed === nodeTrafficPeriod && !forceReload && Date.now() - nodeTrafficLastFailedAt < 4000) {
+        if (table.dataset.bcNodeTrafficFailed === cacheKey && !forceReload && Date.now() - nodeTrafficLastFailedAt < 4000) {
           return true
         }
         if (restoreNodeTrafficTable(table) && !forceReload) {
@@ -1113,7 +1239,7 @@
           return true
         }
         table.dataset.bcNodeTrafficLoaded = ''
-        table.dataset.bcNodeTrafficLoading = nodeTrafficPeriod
+        table.dataset.bcNodeTrafficLoading = cacheKey
         table.dataset.bcNodeTrafficFailed = ''
         setNodeTrafficLoading(table)
         var requestId = ++nodeTrafficRequestId
@@ -1129,7 +1255,7 @@
             return true
           }
           table.dataset.bcNodeTrafficLoading = ''
-          table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
+          table.dataset.bcNodeTrafficFailed = cacheKey
           nodeTrafficLastFailedAt = Date.now()
           if (!restoreNodeTrafficTable(table) && !table.dataset.bcNodeTrafficHasRows) setNodeTrafficMessage(table, '暂无节点维度流量数据')
           return true
@@ -1145,14 +1271,14 @@
           renderNodeTrafficRows(table, payload || {})
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = ''
-          table.dataset.bcNodeTrafficLoaded = nodeTrafficPeriod
+          table.dataset.bcNodeTrafficLoaded = cacheKey
           table.dataset.bcNodeTrafficHasRows = '1'
           ensureTrafficToolbar(table)
           if (shouldScroll) table.scrollIntoView({ block: 'start', behavior: 'smooth' })
         }).catch(function (error) {
           if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
           table.dataset.bcNodeTrafficLoading = ''
-          table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
+          table.dataset.bcNodeTrafficFailed = cacheKey
           nodeTrafficLastFailedAt = Date.now()
           if (window.console && console.warn) console.warn('[node-traffic] load failed', error)
           if (!restoreNodeTrafficTable(table) && !table.dataset.bcNodeTrafficHasRows) {
