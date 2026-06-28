@@ -293,6 +293,12 @@
       line-height: 1.05;
       text-align: center;
     }
+    .bc-sub-import-icon img {
+      display: block;
+      width: 28px;
+      height: 28px;
+      object-fit: contain;
+    }
     .bc-sub-import-main {
       min-width: 0;
       font-size: 16px;
@@ -483,10 +489,10 @@
         var title = encodeURIComponent((window.settings && window.settings.title) || document.title || 'Subscription')
         return [
           {
-            id: 'clash-meta',
-            icon: 'M',
-            title: '导入到 Clash / Verge / Mihomo',
-            desc: 'Windows/macOS/Linux，兼容 Clash Verge Rev、Mihomo Party 等',
+            id: 'clash-verge',
+            icon: '<img src="/theme/xboard/assets/images/clash-verge-rev.png" alt="Clash Verge Rev">',
+            title: '导入到 Clash Verge Rev',
+            desc: 'Windows/macOS/Linux，推荐 Clash Verge Rev，兼容 Mihomo Party 等',
             url: 'clash://install-config?url=' + encodedUrl + '&name=' + title
           },
           {
