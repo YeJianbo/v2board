@@ -780,6 +780,24 @@ class MachineController extends Controller
             Cache::forget($cacheKey);
         }
 
+        $status = $this->decodeMachineStatus($machine);
+        $actionStatus = strtolower(trim((string) ($params['status'] ?? 'success')));
+        if (!in_array($actionStatus, ['success', 'failed'], true)) {
+            $actionStatus = 'success';
+        }
+
+        $status['bbr_action_status'] = $actionStatus;
+        $status['bbr_action_at'] = time();
+        $actionError = trim((string) ($params['error'] ?? ''));
+        if ($actionStatus === 'failed' && $actionError !== '') {
+            $status['bbr_action_error'] = mb_substr($actionError, 0, 255);
+        } else {
+            unset($status['bbr_action_error']);
+        }
+
+        $machine->status = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $machine->save();
+
         return response()->json([
             'data' => 'success',
         ]);
