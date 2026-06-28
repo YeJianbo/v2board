@@ -206,9 +206,31 @@
       .summary { grid-template-columns: 1fr; }
       canvas { height: 300px; }
     }
+    html.embedded body {
+      min-height: 100vh;
+      overflow: auto;
+    }
+    html.embedded .page {
+      width: 100%;
+      margin: 0;
+      padding: 32px 32px 40px;
+    }
+    html.embedded .card {
+      box-shadow: none;
+    }
+    @media (max-width: 900px) {
+      html.embedded .page {
+        padding: 18px 14px 28px;
+      }
+    }
   </style>
 </head>
 <body>
+  <script>
+    if (new URLSearchParams(location.search).get('embed') === '1') {
+      document.documentElement.classList.add('embedded')
+    }
+  </script>
   <main class="page">
     <header class="topbar">
       <div>
@@ -288,7 +310,9 @@
 
     function findTokenInValue(value) {
       if (!value) return '';
-      if (typeof value === 'string' && value.length > 20 && !value.includes('{')) return value;
+      const raw = String(value);
+      const jwt = raw.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+      if (jwt) return jwt[0];
       try {
         const parsed = typeof value === 'string' ? JSON.parse(value) : value;
         const stack = [parsed];
@@ -299,7 +323,9 @@
             const lower = key.toLowerCase();
             const child = item[key];
             if (typeof child === 'string' && ['auth_data', 'authorization', 'token', 'access_token'].includes(lower) && child.length > 20) {
-              return child;
+              const childJwt = child.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+              if (childJwt) return childJwt[0];
+              if (lower !== 'token') return child;
             }
             if (child && typeof child === 'object') stack.push(child);
           }
@@ -312,14 +338,17 @@
       const params = new URLSearchParams(location.search);
       if (params.get('auth_data')) return params.get('auth_data');
       const directKeys = ['auth_data', 'authorization', 'token', 'access_token', 'user_token'];
-      for (const key of directKeys) {
-        const token = findTokenInValue(localStorage.getItem(key));
-        if (token) return token;
-      }
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-        const token = findTokenInValue(localStorage.getItem(key));
-        if (token) return token;
+      const stores = [localStorage, sessionStorage];
+      for (const store of stores) {
+        for (const key of directKeys) {
+          const token = findTokenInValue(store.getItem(key));
+          if (token) return token;
+        }
+        for (let index = 0; index < store.length; index += 1) {
+          const key = store.key(index);
+          const token = findTokenInValue(store.getItem(key));
+          if (token) return token;
+        }
       }
       return '';
     }

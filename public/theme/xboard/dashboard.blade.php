@@ -126,6 +126,57 @@
         renderFrame()
       }
 
+      function findTokenInValue(value) {
+        if (!value) return ''
+        var jwt = String(value).match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)
+        if (jwt) return jwt[0]
+
+        try {
+          var parsed = typeof value === 'string' ? JSON.parse(value) : value
+          var stack = [parsed]
+          while (stack.length) {
+            var item = stack.pop()
+            if (!item || typeof item !== 'object') continue
+            Object.keys(item).forEach(function (key) {
+              var child = item[key]
+              var lower = key.toLowerCase()
+              if (typeof child === 'string') {
+                var childJwt = child.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)
+                if (childJwt && !stack.token) stack.token = childJwt[0]
+                if (['auth_data', 'authorization', 'token', 'access_token'].indexOf(lower) !== -1 && child.length > 20 && !stack.token) {
+                  if (lower !== 'token') stack.token = child
+                }
+              } else if (child && typeof child === 'object') {
+                stack.push(child)
+              }
+            })
+            if (stack.token) return stack.token
+          }
+        } catch (error) {}
+
+        return ''
+      }
+
+      function getAuthToken() {
+        var stores = [window.localStorage, window.sessionStorage]
+        for (var s = 0; s < stores.length; s += 1) {
+          var store = stores[s]
+          for (var i = 0; i < store.length; i += 1) {
+            var key = store.key(i)
+            var token = findTokenInValue(store.getItem(key))
+            if (token) return token
+          }
+        }
+        return ''
+      }
+
+      function buildFrameUrl() {
+        var token = getAuthToken()
+        var url = pageUrl + '?embed=1'
+        if (token) url += '&auth_data=' + encodeURIComponent(token)
+        return url
+      }
+
       function closeNodeTraffic() {
         nodeTrafficOpen = false
         var old = document.querySelector('.bc-node-traffic-frame-wrap')
@@ -145,7 +196,7 @@
         wrap.className = 'bc-node-traffic-frame-wrap'
         var frame = document.createElement('iframe')
         frame.className = 'bc-node-traffic-frame'
-        frame.src = pageUrl
+        frame.src = buildFrameUrl()
         frame.title = menuText
         wrap.appendChild(frame)
         document.body.appendChild(wrap)
