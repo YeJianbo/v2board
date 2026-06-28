@@ -267,7 +267,7 @@
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
       var nodeTrafficPageSize = 10
-      var nodeTrafficPatchVersion = '20260628-controls-outside'
+      var nodeTrafficPatchVersion = '20260628-stable-controls'
       var subscribeInfoCache = null
       var subscribeInfoLoading = null
       var titleCandidates = [
@@ -812,7 +812,7 @@
         table.classList.add('bc-node-traffic-legacy-table')
         ensureNodeTrafficColgroup(table)
         var thead = table.tHead || table.createTHead()
-        thead.innerHTML = '<tr>' + [
+        var headHtml = '<tr>' + [
           '时间',
           '节点',
           '协议',
@@ -822,6 +822,7 @@
           '实际使用',
           '计费流量'
         ].map(renderNodeTrafficHeadCell).join('') + '</tr>'
+        if (thead.innerHTML !== headHtml) thead.innerHTML = headHtml
         return table.tBodies[0] || table.createTBody()
       }
 
@@ -837,7 +838,7 @@
           colgroup = document.createElement('colgroup')
           table.insertBefore(colgroup, table.firstChild)
         }
-        colgroup.innerHTML = [
+        var colgroupHtml = [
           '124px',
           '250px',
           '96px',
@@ -849,6 +850,7 @@
         ].map(function (width) {
           return '<col style="width: ' + width + ';">'
         }).join('')
+        if (colgroup.innerHTML !== colgroupHtml) colgroup.innerHTML = colgroupHtml
       }
 
       function renderNodeTrafficHeadCell(text) {
@@ -950,7 +952,7 @@
           html += '<button type="button" data-page="' + pages[i] + '"' + (pages[i] === currentPage ? ' class="is-active"' : '') + '>' + pages[i] + '</button>'
         }
         html += '<button type="button" data-page-action="next"' + (currentPage >= totalPages ? ' disabled' : '') + '>下一页</button>'
-        pagination.innerHTML = html
+        if (pagination.innerHTML !== html) pagination.innerHTML = html
       }
 
       function cacheNodeTrafficTable(table, pageMeta) {
@@ -974,8 +976,8 @@
         table.classList.add('bc-node-traffic-legacy-table')
         var thead = table.tHead || table.createTHead()
         var tbody = table.tBodies[0] || table.createTBody()
-        thead.innerHTML = cache.thead
-        tbody.innerHTML = cache.tbody
+        if (thead.innerHTML !== cache.thead) thead.innerHTML = cache.thead
+        if (tbody.innerHTML !== cache.tbody) tbody.innerHTML = cache.tbody
         table.dataset.bcNodeTrafficLoaded = nodeTrafficPeriod
         table.dataset.bcNodeTrafficLoading = ''
         table.dataset.bcNodeTrafficFailed = ''
@@ -1045,10 +1047,6 @@
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = ''
         }
-        if (restoreNodeTrafficTable(table) && !forceReload) {
-          if (shouldScroll) table.scrollIntoView({ block: 'start', behavior: 'smooth' })
-          return true
-        }
         if (table.dataset.bcNodeTrafficLoaded === nodeTrafficPeriod && !forceReload) {
           return true
         }
@@ -1056,6 +1054,10 @@
           return true
         }
         if (table.dataset.bcNodeTrafficFailed === nodeTrafficPeriod && !forceReload && Date.now() - nodeTrafficLastFailedAt < 4000) {
+          return true
+        }
+        if (restoreNodeTrafficTable(table) && !forceReload) {
+          if (shouldScroll) table.scrollIntoView({ block: 'start', behavior: 'smooth' })
           return true
         }
         table.dataset.bcNodeTrafficLoaded = ''
