@@ -82,6 +82,46 @@
     body.bc-node-traffic-open {
       overflow: hidden;
     }
+    .bc-sub-import-row {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-height: 64px;
+      padding: 10px 20px;
+      color: #334155;
+      cursor: pointer;
+      border-top: 1px solid rgba(226, 232, 240, .75);
+      transition: background .15s ease, color .15s ease;
+    }
+    .bc-sub-import-row:hover {
+      background: #f8fafc;
+      color: #0f766e;
+    }
+    .bc-sub-import-icon {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      background: #eef7f6;
+      color: #0f766e;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.05;
+      text-align: center;
+    }
+    .bc-sub-import-main {
+      min-width: 0;
+      font-size: 16px;
+      line-height: 1.35;
+    }
+    .bc-sub-import-main small {
+      display: block;
+      margin-top: 2px;
+      color: #64748b;
+      font-size: 12px;
+    }
     @media (max-width: 768px) {
       .bc-node-traffic-frame-wrap {
         left: 0;
@@ -97,6 +137,8 @@
       var nodeTrafficOpen = false
       var activeTitle = null
       var activeFrame = null
+      var insertMenuTimer = 0
+      var subscribeDataPromise = null
 
       function textOf(node) {
         return (node && node.textContent ? node.textContent : '').replace(/\s+/g, '')
@@ -147,9 +189,9 @@
         if (active) {
           activeTitle = title
           if (!title.dataset.bcOriginalText) title.dataset.bcOriginalText = title.textContent
-          title.textContent = menuText
+          if (title.textContent !== menuText) title.textContent = menuText
         } else if (title.dataset.bcOriginalText) {
-          title.textContent = title.dataset.bcOriginalText
+          if (title.textContent !== title.dataset.bcOriginalText) title.textContent = title.dataset.bcOriginalText
           delete title.dataset.bcOriginalText
           activeTitle = null
         }
@@ -204,6 +246,15 @@
         return ''
       }
 
+      function schedulePatch() {
+        if (insertMenuTimer) return
+        insertMenuTimer = window.setTimeout(function () {
+          insertMenuTimer = 0
+          insertMenu()
+          patchSubscribeImports()
+        }, 80)
+      }
+
       function buildFrameUrl() {
         return pageUrl + '?embed=1'
       }
@@ -224,6 +275,105 @@
           type: 'bc-node-traffic-auth',
           auth_data: token
         }, window.location.origin)
+      }
+
+      function getSubscribeData() {
+        if (subscribeDataPromise) return subscribeDataPromise
+        var token = getAuthToken()
+        if (!token) return Promise.resolve(null)
+        subscribeDataPromise = fetch('/api/v1/user/getSubscribe', {
+          headers: { Authorization: token }
+        }).then(function (response) {
+          if (!response.ok) throw new Error('getSubscribe ' + response.status)
+          return response.json()
+        }).then(function (payload) {
+          return payload && payload.data ? payload.data : null
+        }).catch(function () {
+          subscribeDataPromise = null
+          return null
+        })
+        return subscribeDataPromise
+      }
+
+      function importRows(subscribeUrl) {
+        var encodedUrl = encodeURIComponent(subscribeUrl)
+        var title = encodeURIComponent((window.settings && window.settings.title) || document.title || 'Subscription')
+        return [
+          {
+            id: 'clash-meta',
+            icon: 'M',
+            title: '导入到 Clash / Verge / Mihomo',
+            desc: 'Windows/macOS/Linux，兼容 Clash Verge Rev、Mihomo Party 等',
+            url: 'clash://install-config?url=' + encodedUrl + '&name=' + title
+          },
+          {
+            id: 'singbox',
+            icon: 'SB',
+            title: '导入到 sing-box / Hiddify Next',
+            desc: '适合 Hiddify Next、SFI、SFA 等 sing-box 系客户端',
+            url: 'sing-box://import-remote-profile?url=' + encodedUrl + '#' + title
+          },
+          {
+            id: 'nekobox',
+            icon: 'NK',
+            title: '导入到 NekoBox Android',
+            desc: 'Android NekoBox 订阅分组导入',
+            url: 'nekobox://install-config?name=' + title + '&type=SUBSCRIPTION&AUTOUPDATE=true&updatetime=1440&url=' + encodedUrl
+          }
+        ]
+      }
+
+      function findSubscribePanel() {
+        var nodes = Array.prototype.slice.call(document.querySelectorAll('div, section, article'))
+        var matches = nodes.filter(function (node) {
+          var text = textOf(node)
+          return text.indexOf('复制订阅地址') !== -1 && text.indexOf('扫描二维码订阅') !== -1
+        }).sort(function (a, b) {
+          var ar = a.getBoundingClientRect()
+          var br = b.getBoundingClientRect()
+          return (ar.width * ar.height) - (br.width * br.height)
+        })
+        return matches.find(function (node) {
+          var rect = node.getBoundingClientRect()
+          return rect.width >= 220 && rect.height >= 120 && rect.width <= 560
+        }) || null
+      }
+
+      function patchSubscribeImports() {
+        var panel = findSubscribePanel()
+        if (!panel || panel.dataset.bcImportEnhanced === '1') return
+        panel.dataset.bcImportEnhanced = '1'
+        getSubscribeData().then(function (data) {
+          if (!data || !data.subscribe_url || !document.documentElement.contains(panel)) {
+            if (panel) delete panel.dataset.bcImportEnhanced
+            return
+          }
+          importRows(data.subscribe_url).forEach(function (item) {
+            if (panel.querySelector('[data-bc-import-id="' + item.id + '"]')) return
+            var row = document.createElement('div')
+            row.className = 'bc-sub-import-row'
+            row.dataset.bcImportId = item.id
+            row.innerHTML = '<span class="bc-sub-import-icon">' + item.icon + '</span><span class="bc-sub-import-main">' + item.title + '<small>' + item.desc + '</small></span>'
+            row.addEventListener('click', function (event) {
+              event.preventDefault()
+              event.stopPropagation()
+              window.location.href = item.url
+            })
+            var footer = Array.prototype.slice.call(panel.querySelectorAll('button, a')).find(function (node) {
+              var text = textOf(node)
+              return text.indexOf('不会使用') !== -1 || text.indexOf('查看使用教程') !== -1
+            })
+            var footerBlock = footer
+            while (footerBlock && footerBlock.parentElement && footerBlock.parentElement !== panel) {
+              footerBlock = footerBlock.parentElement
+            }
+            if (footerBlock && footerBlock.parentElement === panel) {
+              panel.insertBefore(row, footerBlock)
+            } else {
+              panel.appendChild(row)
+            }
+          })
+        })
       }
 
       function measureLayout() {
@@ -307,7 +457,7 @@
           inserted = true
           if (nodeTrafficOpen) {
             existingMenu.classList.add('is-active')
-            renderFrame()
+            updateFrameLayout()
           }
           return
         }
@@ -333,9 +483,7 @@
         }
       }
 
-      var observer = new MutationObserver(function () {
-        insertMenu()
-      })
+      var observer = new MutationObserver(schedulePatch)
       observer.observe(document.documentElement, { childList: true, subtree: true })
       window.addEventListener('hashchange', closeNodeTraffic)
       window.addEventListener('resize', updateFrameLayout)
@@ -344,9 +492,9 @@
         if (!event.data || event.data.type !== 'bc-node-traffic-need-auth') return
         syncFrameAuth(activeFrame)
       })
-      window.addEventListener('load', insertMenu)
-      setTimeout(insertMenu, 800)
-      setTimeout(insertMenu, 2000)
+      window.addEventListener('load', schedulePatch)
+      setTimeout(schedulePatch, 800)
+      setTimeout(schedulePatch, 2000)
     })()
   </script>
   {!! $theme_config['custom_html'] !!}
