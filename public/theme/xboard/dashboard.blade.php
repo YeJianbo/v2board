@@ -677,9 +677,10 @@
         nodeTrafficOpen = true
         syncMenuState(true)
         var legacyRoot = findLegacyTrafficRoot()
+        var legacyTable = findLegacyTrafficTable()
         var existing = document.querySelector('.bc-node-traffic-frame-wrap')
         if (existing) {
-          if (legacyRoot && !legacyRoot.contains(existing)) {
+          if (legacyTable || (legacyRoot && !legacyRoot.contains(existing))) {
             existing.remove()
             if (activeHost) activeHost.classList.remove('bc-node-traffic-content-host')
             activeFrame = null
