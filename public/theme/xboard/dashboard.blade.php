@@ -709,9 +709,26 @@
         return rate.toFixed(2) + ' x'
       }
 
+      function getNodeTrafficRate(row) {
+        var rate = Number(row.rate != null ? row.rate : row.server_rate)
+        return isFinite(rate) ? rate : 1
+      }
+
+      function getNodeTrafficTotal(row) {
+        var total = Number(row.total)
+        if (isFinite(total) && total >= 0) return total
+        return Number(row.u || 0) + Number(row.d || 0)
+      }
+
+      function getNodeTrafficCost(row) {
+        var cost = Number(row.cost)
+        if (isFinite(cost) && cost >= 0) return cost
+        return getNodeTrafficTotal(row) * getNodeTrafficRate(row)
+      }
+
       function formatProtocol(row) {
         var serverType = String(row.server_type || row.node_type || '').toLowerCase()
-        var protocol = String(row.protocol || row.type || '').toLowerCase()
+        var protocol = String(row.protocol || row.display_protocol || row.type || '').toLowerCase()
         if (!protocol || protocol === 'v2node') {
           protocol = serverType === 'v2node' ? '' : serverType
         }
@@ -965,17 +982,18 @@
         var start = (currentPage - 1) * nodeTrafficPageSize
         var pageRows = rows.slice(start, start + nodeTrafficPageSize)
         tbody.innerHTML = pageRows.map(function (row) {
-          var nodeName = row.name || '未命名节点'
+          var nodeName = row.name || row.server_name || '未命名节点'
           var protocol = formatProtocol(row)
+          var rate = getNodeTrafficRate(row)
           return '<tr>' +
             renderNodeTrafficBodyCell(formatTrafficTime(row.record_at, nodeTrafficPeriod)) +
             renderNodeTrafficBodyCell(nodeName, { title: nodeName }) +
             renderNodeTrafficBodyCell(renderNodeTrafficPill(protocol, 'protocol'), { html: true }) +
-            renderNodeTrafficBodyCell(renderNodeTrafficPill(formatRate(row.rate), 'rate'), { html: true }) +
+            renderNodeTrafficBodyCell(renderNodeTrafficPill(formatRate(rate), 'rate'), { html: true }) +
             renderNodeTrafficBodyCell(formatBytes(row.u)) +
             renderNodeTrafficBodyCell(formatBytes(row.d)) +
-            renderNodeTrafficBodyCell(formatBytes(row.total || (Number(row.u || 0) + Number(row.d || 0)))) +
-            renderNodeTrafficBodyCell(formatBytes(row.cost)) +
+            renderNodeTrafficBodyCell(formatBytes(getNodeTrafficTotal(row))) +
+            renderNodeTrafficBodyCell(formatBytes(getNodeTrafficCost(row))) +
             '</tr>'
         }).join('')
         renderNodeTrafficPagination(table, rows.length, totalPages, currentPage)
