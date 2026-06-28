@@ -387,10 +387,9 @@
           for (const key of Object.keys(item)) {
             const lower = key.toLowerCase();
             const child = item[key];
-            if (typeof child === 'string' && ['auth_data', 'authorization', 'token', 'access_token'].includes(lower) && child.length > 20) {
+            if (typeof child === 'string' && ['auth_data', 'authorization', 'access_token', 'user_token', 'Vue_Naive_access_token'].includes(lower) && child.length > 20) {
               const childJwt = child.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
               if (childJwt) return childJwt[0];
-              if (lower !== 'token') return child;
             }
             if (child && typeof child === 'object') stack.push(child);
           }
@@ -405,15 +404,18 @@
       if (state.authToken) return state.authToken;
       const sharedToken = findTokenInValue(sessionStorage.getItem('bc_node_traffic_auth_data'));
       if (sharedToken) return sharedToken;
-      const directKeys = ['Vue_Naive_access_token', 'access_token', 'auth_data', 'authorization', 'token', 'user_token'];
+      const directKeys = ['Vue_Naive_access_token', 'access_token', 'auth_data', 'authorization', 'user_token'];
+      const cookies = String(document.cookie || '').split(';');
+      for (const item of cookies) {
+        const pair = item.split('=');
+        const key = decodeURIComponent(String(pair.shift() || '').trim());
+        if (!directKeys.includes(key)) continue;
+        const token = findTokenInValue(decodeURIComponent(pair.join('=') || ''));
+        if (token) return token;
+      }
       const stores = [localStorage, sessionStorage];
       for (const store of stores) {
         for (const key of directKeys) {
-          const token = findTokenInValue(store.getItem(key));
-          if (token) return token;
-        }
-        for (let index = 0; index < store.length; index += 1) {
-          const key = store.key(index);
           const token = findTokenInValue(store.getItem(key));
           if (token) return token;
         }

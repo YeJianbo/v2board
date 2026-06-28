@@ -250,6 +250,7 @@
       var nodeTrafficRequestId = 0
       var capturedAuthToken = ''
       var nodeTrafficAuthRetry = 0
+      var nodeTrafficLastFailedAt = 0
       var titleCandidates = [
         '仪表盘',
         '使用文档',
@@ -513,6 +514,20 @@
         return ''
       }
 
+      function getNamedCookieToken() {
+        var allowed = ['auth_data', 'authorization', 'access_token', 'user_token', 'Vue_Naive_access_token']
+        var cookies = String(document.cookie || '').split(';')
+        for (var i = 0; i < cookies.length; i += 1) {
+          var pair = cookies[i].split('=')
+          var key = decodeURIComponent(String(pair.shift() || '').trim())
+          if (allowed.indexOf(key) === -1) continue
+          var value = decodeURIComponent(pair.join('=') || '')
+          var token = findTokenInValue(value)
+          if (token) return rememberAuthToken(token)
+        }
+        return ''
+      }
+
       function getAuthToken() {
         if (capturedAuthToken) return capturedAuthToken
         try {
@@ -520,6 +535,8 @@
           var urlJwt = rememberAuthToken(urlToken)
           if (urlJwt) return urlJwt
         } catch (error) {}
+        var cookieToken = getNamedCookieToken()
+        if (cookieToken) return cookieToken
         var stores = [window.localStorage, window.sessionStorage]
         var priorityKeys = ['auth_data', 'authorization', 'access_token', 'user_token', 'Vue_Naive_access_token']
         for (var s = 0; s < stores.length; s += 1) {
@@ -675,7 +692,7 @@
         if (table.dataset.bcNodeTrafficLoading === nodeTrafficPeriod && !forceReload) {
           return true
         }
-        if (table.dataset.bcNodeTrafficFailed === nodeTrafficPeriod && !forceReload) {
+        if (table.dataset.bcNodeTrafficFailed === nodeTrafficPeriod && !forceReload && Date.now() - nodeTrafficLastFailedAt < 4000) {
           return true
         }
         table.dataset.bcNodeTrafficLoaded = ''
@@ -697,6 +714,7 @@
           }
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
+          nodeTrafficLastFailedAt = Date.now()
           setNodeTrafficLoading(table, '当前登录态读取失败，请刷新后重新登录')
           return true
         }
@@ -719,6 +737,7 @@
           if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
           table.dataset.bcNodeTrafficLoading = ''
           table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
+          nodeTrafficLastFailedAt = Date.now()
           setNodeTrafficLoading(table, '节点流量明细加载失败，请刷新后重试；若刚登录，请切换一次按小时再切回按天')
         })
         return true
