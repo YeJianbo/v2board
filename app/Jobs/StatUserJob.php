@@ -2,8 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Models\StatServer;
-use App\Models\StatUser;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -44,45 +42,44 @@ class StatUserJob implements ShouldQueue
     public function handle()
     {
         $recordAt = strtotime(date('Y-m-d'));
-        if ($this->recordType === 'm') {
-            //
-        }
+        $serverRate = (string) ($this->server['rate'] ?? '1.00');
         $attempt = 0;
         $maxAttempts = 3;
-        $existingData = StatUser::where('record_at', $recordAt)
-        ->where('server_rate', $this->server['rate'])
-        ->whereIn('user_id', array_keys($this->data))
-        ->select(['user_id', 'id', 'u', 'd'])
-        ->get()
-        ->keyBy('user_id');
 
-        $insertData = [];
         while ($attempt < $maxAttempts) {
             try {
                 DB::beginTransaction();
-                foreach($this->data as $userId => $trafficData){
-                    if (isset($existingData[$userId])) {
-                        $userdata = StatUser::where('id', $existingData[$userId]['id'])->first();
-                        $userdata->update([
-                            'u' => $userdata['u'] + $trafficData[0],
-                            'd' => $userdata['d'] + $trafficData[1]
-                        ]);
-                    } else {
-                        $insertData[] = [
-                            'user_id' => $userId,
-                            'server_rate' => $this->server['rate'],
-                            'u' => $trafficData[0],
-                            'd' => $trafficData[1],
-                            'record_type' => $this->recordType,
-                            'record_at' => $recordAt
-                        ];
+
+                $now = time();
+                foreach ($this->data as $userId => $trafficData) {
+                    $u = (int) ($trafficData[0] ?? 0);
+                    $d = (int) ($trafficData[1] ?? 0);
+
+                    if ($u <= 0 && $d <= 0) {
+                        continue;
                     }
+
+                    DB::statement(
+                        "INSERT INTO v2_stat_user
+                            (user_id, server_rate, u, d, record_type, record_at, created_at, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE
+                            u = u + VALUES(u),
+                            d = d + VALUES(d),
+                            updated_at = VALUES(updated_at)",
+                        [
+                            (int) $userId,
+                            $serverRate,
+                            $u,
+                            $d,
+                            $this->recordType,
+                            $recordAt,
+                            $now,
+                            $now,
+                        ]
+                    );
                 }
-                if (!empty($insertData)) {
-                    collect($insertData)->chunk(500)->each(function ($chunk) {
-                        StatUser::upsert($chunk->toArray(), ['user_id', 'server_rate', 'record_at']);
-                    });
-                }
+
                 DB::commit();
                 return;
             } catch (\Exception $e) {

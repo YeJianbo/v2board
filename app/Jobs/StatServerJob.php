@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Models\StatServer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -47,41 +46,63 @@ class StatServerJob implements ShouldQueue
     public function handle()
     {
         $recordAt = strtotime(date('Y-m-d'));
-        if ($this->recordType === 'm') {
-            //
+        $serverId = (int) ($this->server['id'] ?? 0);
+        $serverType = strtolower((string) $this->protocol);
+
+        if ($serverId <= 0 || $serverType === '') {
+            return;
         }
-        try {
-            DB::beginTransaction();
-            $u = 0;
-            $d = 0;
-            foreach(array_keys($this->data) as $userId){
-                $u += $this->data[$userId][0];
-                $d += $this->data[$userId][1];
+
+        $attempt = 0;
+        $maxAttempts = 3;
+
+        while ($attempt < $maxAttempts) {
+            try {
+                DB::beginTransaction();
+
+                $u = 0;
+                $d = 0;
+                foreach ($this->data as $trafficData) {
+                    $u += (int) ($trafficData[0] ?? 0);
+                    $d += (int) ($trafficData[1] ?? 0);
+                }
+
+                if ($u > 0 || $d > 0) {
+                    $now = time();
+                    DB::statement(
+                        "INSERT INTO v2_stat_server
+                            (server_id, server_type, u, d, record_type, record_at, created_at, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE
+                            u = u + VALUES(u),
+                            d = d + VALUES(d),
+                            updated_at = VALUES(updated_at)",
+                        [
+                            $serverId,
+                            $serverType,
+                            $u,
+                            $d,
+                            $this->recordType,
+                            $recordAt,
+                            $now,
+                            $now,
+                        ]
+                    );
+                }
+
+                DB::commit();
+                return;
+            } catch (\Exception $e) {
+                DB::rollback();
+                if (strpos($e->getMessage(), '40001') !== false || strpos(strtolower($e->getMessage()), 'deadlock') !== false) {
+                    $attempt++;
+                    if ($attempt < $maxAttempts) {
+                        sleep(pow(2, $attempt));
+                        continue;
+                    }
+                }
+                throw new \RuntimeException('节点统计数据失败' . $e->getMessage(), 0, $e);
             }
-            $serverdata = StatServer::lockForUpdate()
-                ->where('record_at', $recordAt)
-                ->where('server_id', $this->server['id'])
-                ->where('server_type', $this->protocol)
-                ->lockForUpdate()->first();
-            if ($serverdata) {
-                $serverdata->update([
-                    'u' => $serverdata['u'] + $u,
-                    'd' => $serverdata['d'] + $d
-                ]);
-            } else {
-                StatServer::create([
-                    'server_id' => $this->server['id'],
-                    'server_type' => $this->protocol,
-                    'u' => $u,
-                    'd' => $d,
-                    'record_type' => $this->recordType,
-                    'record_at' => $recordAt
-                ]);
-            }
-            DB::commit();
-        } catch (\Exception $e) {
-            DB::rollback();
-            throw new \RuntimeException('节点统计数据失败' . $e->getMessage(), 0, $e);
         }
     }
 }
