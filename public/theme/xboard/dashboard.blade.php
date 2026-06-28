@@ -387,6 +387,7 @@
         try {
           var parsed = typeof value === 'string' ? JSON.parse(value) : value
           var stack = [parsed]
+          var fallbackToken = ''
           while (stack.length) {
             var item = stack.pop()
             if (!item || typeof item !== 'object') continue
@@ -396,8 +397,10 @@
               if (typeof child === 'string') {
                 var childJwt = child.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)
                 if (childJwt && !stack.token) stack.token = childJwt[0]
-                if (['auth_data', 'authorization', 'token', 'access_token'].indexOf(lower) !== -1 && child.length > 20 && !stack.token) {
+                if (['auth_data', 'authorization', 'access_token', 'user_token'].indexOf(lower) !== -1 && child.length > 20 && !stack.token) {
                   stack.token = child
+                } else if (lower === 'token' && child.length > 20 && !fallbackToken) {
+                  fallbackToken = child
                 }
               } else if (child && typeof child === 'object') {
                 stack.push(child)
@@ -405,6 +408,7 @@
             })
             if (stack.token) return stack.token
           }
+          if (fallbackToken) return fallbackToken
         } catch (error) {}
 
         return ''
@@ -442,9 +446,14 @@
         }, 80)
       }
 
-      function getNodeTrafficAuth() {
-        var token = getAuthToken()
-        return token ? { Authorization: token } : {}
+      function buildNodeTrafficUrl(token) {
+        var url = '/api/v1/user/stat/getNodeTrafficLog?period=' + encodeURIComponent(nodeTrafficPeriod) + '&include_total=1'
+        if (token) url += '&auth_data=' + encodeURIComponent(token)
+        return url
+      }
+
+      function getNodeTrafficHeaders(token) {
+        return token ? { Authorization: token, authorization: token } : {}
       }
 
       function escapeHtml(value) {
@@ -505,6 +514,7 @@
             if (!button) return
             nodeTrafficPeriod = button.dataset.period || 'day'
             table.dataset.bcNodeTrafficLoaded = ''
+            table.dataset.bcNodeTrafficFailed = ''
             patchLegacyTrafficTable(false, true)
           })
         }
@@ -561,12 +571,23 @@
         if (table.dataset.bcNodeTrafficLoading === nodeTrafficPeriod && !forceReload) {
           return true
         }
+        if (table.dataset.bcNodeTrafficFailed === nodeTrafficPeriod && !forceReload) {
+          return true
+        }
         table.dataset.bcNodeTrafficLoaded = ''
         table.dataset.bcNodeTrafficLoading = nodeTrafficPeriod
+        table.dataset.bcNodeTrafficFailed = ''
         setNodeTrafficLoading(table, '加载节点流量明细...')
         var requestId = ++nodeTrafficRequestId
-        fetch('/api/v1/user/stat/getNodeTrafficLog?period=' + encodeURIComponent(nodeTrafficPeriod) + '&include_total=1', {
-          headers: getNodeTrafficAuth()
+        var token = getAuthToken()
+        if (!token) {
+          table.dataset.bcNodeTrafficLoading = ''
+          table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
+          setNodeTrafficLoading(table, '登录状态读取失败，请刷新后重新登录')
+          return true
+        }
+        fetch(buildNodeTrafficUrl(token), {
+          headers: getNodeTrafficHeaders(token)
         }).then(function (response) {
           if (!response.ok) throw new Error('getNodeTrafficLog ' + response.status)
           return response.json()
@@ -575,12 +596,14 @@
           setNodeTrafficLoading(table, '加载节点流量明细...')
           renderNodeTrafficRows(table, payload || {})
           table.dataset.bcNodeTrafficLoading = ''
+          table.dataset.bcNodeTrafficFailed = ''
           table.dataset.bcNodeTrafficLoaded = nodeTrafficPeriod
           ensureTrafficToolbar(table)
           if (shouldScroll) table.scrollIntoView({ block: 'start', behavior: 'smooth' })
         }).catch(function () {
           if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
           table.dataset.bcNodeTrafficLoading = ''
+          table.dataset.bcNodeTrafficFailed = nodeTrafficPeriod
           setNodeTrafficLoading(table, '节点流量明细加载失败，请刷新后重试')
         })
         return true
