@@ -595,6 +595,12 @@ class MachineController extends Controller
             'tcp_congestion_control',
             'bbr_status',
             'docker_summary',
+            'ipv4',
+            'ipv6',
+            'public_ipv4',
+            'public_ipv6',
+            'primary_ipv4',
+            'primary_ipv6',
         ];
         $numericStatusKeys = [
             'load1',
