@@ -40,8 +40,8 @@
       align-items: center;
       gap: 12px;
       min-height: 42px;
-      margin: 4px 6px 4px 6px;
-      padding: 0 20px;
+      margin: 4px 8px 4px 12px;
+      padding: 0 18px 0 28px;
       border-radius: 4px;
       color: inherit;
       font-size: 14px;
@@ -55,11 +55,12 @@
     }
     .bc-node-traffic-menu::before {
       content: "";
-      width: 14px;
-      height: 14px;
-      border-left: 3px solid currentColor;
-      border-bottom: 3px solid currentColor;
-      box-shadow: 5px 0 0 -1px currentColor, 10px -6px 0 -1px currentColor;
+      width: 18px;
+      height: 18px;
+      background:
+        linear-gradient(currentColor, currentColor) 2px 10px / 4px 8px no-repeat,
+        linear-gradient(currentColor, currentColor) 8px 5px / 4px 13px no-repeat,
+        linear-gradient(currentColor, currentColor) 14px 0 / 4px 18px no-repeat;
     }
     .bc-node-traffic-frame-wrap {
       position: fixed;
@@ -69,6 +70,7 @@
       bottom: 0;
       z-index: 100;
       background: #f5f7fb;
+      overflow: hidden;
     }
     .bc-node-traffic-frame {
       width: 100%;
@@ -126,6 +128,27 @@
         renderFrame()
       }
 
+      function findTopTitle() {
+        var nodes = Array.prototype.slice.call(document.querySelectorAll('a, div, span, h1, h2'))
+        return nodes.find(function (node) {
+          if (textOf(node) !== '流量明细') return false
+          var rect = node.getBoundingClientRect()
+          return rect.width > 0 && rect.height > 0 && rect.left > 280 && rect.top < 90
+        })
+      }
+
+      function setTopTitleActive(active) {
+        var title = findTopTitle()
+        if (!title) return
+        if (active) {
+          if (!title.dataset.bcOriginalText) title.dataset.bcOriginalText = title.textContent
+          title.textContent = menuText
+        } else if (title.dataset.bcOriginalText) {
+          title.textContent = title.dataset.bcOriginalText
+          delete title.dataset.bcOriginalText
+        }
+      }
+
       function findTokenInValue(value) {
         if (!value) return ''
         var jwt = String(value).match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)
@@ -171,10 +194,19 @@
       }
 
       function buildFrameUrl() {
+        return pageUrl + '?embed=1'
+      }
+
+      function syncFrameAuth(frame) {
         var token = getAuthToken()
-        var url = pageUrl + '?embed=1'
-        if (token) url += '&auth_data=' + encodeURIComponent(token)
-        return url
+        if (!token) return
+        try {
+          window.sessionStorage.setItem('bc_node_traffic_auth_data', token)
+        } catch (error) {}
+        frame.contentWindow && frame.contentWindow.postMessage({
+          type: 'bc-node-traffic-auth',
+          auth_data: token
+        }, window.location.origin)
       }
 
       function closeNodeTraffic() {
@@ -184,12 +216,14 @@
         document.body.classList.remove('bc-node-traffic-open')
         var menu = document.querySelector('.bc-node-traffic-menu')
         if (menu) menu.classList.remove('is-active')
+        setTopTitleActive(false)
       }
 
       function renderFrame() {
         nodeTrafficOpen = true
         var menu = document.querySelector('.bc-node-traffic-menu')
         if (menu) menu.classList.add('is-active')
+        setTopTitleActive(true)
         if (document.querySelector('.bc-node-traffic-frame-wrap')) return
 
         var wrap = document.createElement('div')
@@ -198,8 +232,12 @@
         frame.className = 'bc-node-traffic-frame'
         frame.src = buildFrameUrl()
         frame.title = menuText
+        frame.addEventListener('load', function () {
+          syncFrameAuth(frame)
+        })
         wrap.appendChild(frame)
         document.body.appendChild(wrap)
+        syncFrameAuth(frame)
         document.body.classList.add('bc-node-traffic-open')
       }
 

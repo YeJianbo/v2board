@@ -213,7 +213,7 @@
     html.embedded .page {
       width: 100%;
       margin: 0;
-      padding: 32px 32px 40px;
+      padding: 24px 24px 34px;
     }
     html.embedded .card {
       box-shadow: none;
@@ -296,6 +296,7 @@
       period: 'day',
       selected: new Set(),
       payload: null,
+      authToken: '',
     };
 
     const colors = ['#0f766e', '#2563eb', '#dc2626', '#7c3aed', '#ea580c', '#0891b2', '#4d7c0f', '#be123c'];
@@ -337,6 +338,9 @@
     function getAuthToken() {
       const params = new URLSearchParams(location.search);
       if (params.get('auth_data')) return params.get('auth_data');
+      if (state.authToken) return state.authToken;
+      const sharedToken = findTokenInValue(sessionStorage.getItem('bc_node_traffic_auth_data'));
+      if (sharedToken) return sharedToken;
       const directKeys = ['auth_data', 'authorization', 'token', 'access_token', 'user_token'];
       const stores = [localStorage, sessionStorage];
       for (const store of stores) {
@@ -497,7 +501,7 @@
         headers: { authorization: token },
       });
       if (!response.ok) {
-        setStatus(`加载失败：${response.status}`, true);
+        setStatus(response.status === 403 ? '登录态无效，请刷新用户中心后重试' : `加载失败：${response.status}`, true);
         return;
       }
       state.payload = await response.json();
@@ -529,6 +533,17 @@
       renderAll();
     });
     window.addEventListener('resize', renderAll);
+    window.addEventListener('message', (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || event.data.type !== 'bc-node-traffic-auth') return;
+      const token = findTokenInValue(event.data.auth_data);
+      if (!token || token === state.authToken) return;
+      state.authToken = token;
+      try {
+        sessionStorage.setItem('bc_node_traffic_auth_data', token);
+      } catch (error) {}
+      loadData();
+    });
     loadData();
   </script>
 </body>
