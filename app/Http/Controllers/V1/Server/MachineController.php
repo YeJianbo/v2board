@@ -20,6 +20,8 @@ use Illuminate\Support\Str;
 class MachineController extends Controller
 {
     private const SIGNATURE_WINDOW_SECONDS = 300;
+    private const ENROLL_TOKEN_TTL_SECONDS = 604800;
+    private const ENROLL_TOKEN_DEFAULT_MAX_USES = 100;
 
     private function panelSetting(string $key, $default = null)
     {
@@ -642,8 +644,31 @@ class MachineController extends Controller
         ]);
 
         $cacheKey = 'v2node_probe_enroll:' . hash('sha256', (string) $params['enroll_token']);
-        if (!Cache::has($cacheKey)) {
+        $enrollMeta = Cache::get($cacheKey);
+        if (!$enrollMeta) {
             abort(401, 'Unauthorized: Invalid enrollment token');
+        }
+
+        if (!is_array($enrollMeta)) {
+            $enrollMeta = [
+                'uses' => 0,
+                'max_uses' => self::ENROLL_TOKEN_DEFAULT_MAX_USES,
+                'created_at' => time(),
+                'expires_at' => time() + self::ENROLL_TOKEN_TTL_SECONDS,
+            ];
+        }
+
+        $uses = max(0, (int) ($enrollMeta['uses'] ?? 0));
+        $maxUses = max(1, (int) ($enrollMeta['max_uses'] ?? self::ENROLL_TOKEN_DEFAULT_MAX_USES));
+        $expiresAt = (int) ($enrollMeta['expires_at'] ?? (time() + self::ENROLL_TOKEN_TTL_SECONDS));
+        if ($expiresAt <= time()) {
+            Cache::forget($cacheKey);
+            abort(401, 'Unauthorized: Enrollment token expired');
+        }
+
+        if ($uses >= $maxUses) {
+            Cache::forget($cacheKey);
+            abort(401, 'Unauthorized: Enrollment token usage limit exceeded');
         }
 
         $host = trim((string) ($params['host'] ?? ''));
@@ -668,6 +693,16 @@ class MachineController extends Controller
                 'host' => $host,
                 'api_token' => Str::random(32),
             ]);
+        }
+
+        $uses++;
+        if ($uses >= $maxUses) {
+            Cache::forget($cacheKey);
+        } else {
+            $enrollMeta['uses'] = $uses;
+            $enrollMeta['max_uses'] = $maxUses;
+            $enrollMeta['expires_at'] = $expiresAt;
+            Cache::put($cacheKey, $enrollMeta, max(1, $expiresAt - time()));
         }
 
         return response()->json([

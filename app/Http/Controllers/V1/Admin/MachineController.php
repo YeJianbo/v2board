@@ -16,6 +16,7 @@ use Illuminate\Validation\ValidationException;
 class MachineController extends Controller
 {
     private const INSTALL_TOKEN_TTL_SECONDS = 604800;
+    private const INSTALL_TOKEN_MAX_USES = 100;
     private const ONLINE_WINDOW_SECONDS = 180;
     private const RESTART_TOKEN_TTL_SECONDS = 300;
 
@@ -317,13 +318,20 @@ class MachineController extends Controller
     public function installToken(Request $request)
     {
         $token = Str::random(48);
-        Cache::put('v2node_probe_enroll:' . hash('sha256', $token), true, self::INSTALL_TOKEN_TTL_SECONDS);
+        Cache::put('v2node_probe_enroll:' . hash('sha256', $token), [
+            'uses' => 0,
+            'max_uses' => self::INSTALL_TOKEN_MAX_USES,
+            'created_at' => time(),
+            'expires_at' => time() + self::INSTALL_TOKEN_TTL_SECONDS,
+        ], self::INSTALL_TOKEN_TTL_SECONDS);
 
         return response([
             'data' => [
                 'token' => $token,
                 'expires_in' => self::INSTALL_TOKEN_TTL_SECONDS,
                 'expires_at' => time() + self::INSTALL_TOKEN_TTL_SECONDS,
+                'max_uses' => self::INSTALL_TOKEN_MAX_USES,
+                'remaining_uses' => self::INSTALL_TOKEN_MAX_USES,
             ],
         ]);
     }
