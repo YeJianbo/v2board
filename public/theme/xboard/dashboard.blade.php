@@ -91,6 +91,7 @@
       var pageUrl = '/user-node-traffic.html'
       var menuText = '节点流量明细'
       var inserted = false
+      var nodeTrafficOpen = false
 
       function textOf(node) {
         return (node && node.textContent ? node.textContent : '').replace(/\s+/g, '')
@@ -122,11 +123,11 @@
       }
 
       function openNodeTraffic() {
-        location.hash = '#/node-traffic'
         renderFrame()
       }
 
       function closeNodeTraffic() {
+        nodeTrafficOpen = false
         var old = document.querySelector('.bc-node-traffic-frame-wrap')
         if (old) old.remove()
         document.body.classList.remove('bc-node-traffic-open')
@@ -135,12 +136,7 @@
       }
 
       function renderFrame() {
-        var isNodeTraffic = location.hash.indexOf('/node-traffic') !== -1
-        if (!isNodeTraffic) {
-          closeNodeTraffic()
-          return
-        }
-
+        nodeTrafficOpen = true
         var menu = document.querySelector('.bc-node-traffic-menu')
         if (menu) menu.classList.add('is-active')
         if (document.querySelector('.bc-node-traffic-frame-wrap')) return
@@ -159,7 +155,7 @@
       function insertMenu() {
         if (inserted || document.querySelector('.bc-node-traffic-menu')) {
           inserted = true
-          renderFrame()
+          if (nodeTrafficOpen) renderFrame()
           return
         }
 
@@ -169,17 +165,17 @@
         var root = clickableRoot(traffic)
         var item = document.createElement('a')
         item.className = 'bc-node-traffic-menu'
-        item.href = '#/node-traffic'
+        item.href = 'javascript:void(0)'
         item.innerHTML = '<span>' + menuText + '</span>'
         item.addEventListener('click', function (event) {
           event.preventDefault()
+          event.stopPropagation()
           openNodeTraffic()
         })
 
         if (root.parentElement) {
           root.parentElement.insertBefore(item, root.nextSibling)
           inserted = true
-          renderFrame()
         }
       }
 
@@ -187,7 +183,7 @@
         insertMenu()
       })
       observer.observe(document.documentElement, { childList: true, subtree: true })
-      window.addEventListener('hashchange', renderFrame)
+      window.addEventListener('hashchange', closeNodeTraffic)
       window.addEventListener('load', insertMenu)
       setTimeout(insertMenu, 800)
       setTimeout(insertMenu, 2000)
