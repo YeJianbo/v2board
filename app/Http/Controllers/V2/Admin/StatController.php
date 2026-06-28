@@ -277,12 +277,23 @@ class StatController extends Controller
     public function getStatUser(Request $request)
     {
         $request->validate([
-            'user_id' => 'required|integer'
+            'user_id' => 'required|integer',
+            'start_time' => 'nullable|integer|min:1000000000|max:9999999999',
+            'end_time' => 'nullable|integer|min:1000000000|max:9999999999',
         ]);
 
         $pageSize = $request->input('pageSize', 10);
-        $records = StatUser::orderBy('record_at', 'DESC')
-            ->where('user_id', $request->input('user_id'))
+        $recordsQuery = StatUser::where('user_id', $request->input('user_id'));
+
+        if ($request->input('start_time')) {
+            $recordsQuery->where('record_at', '>=', (int) $request->input('start_time'));
+        }
+        if ($request->input('end_time')) {
+            $recordsQuery->where('record_at', '<=', (int) $request->input('end_time'));
+        }
+
+        $records = $recordsQuery
+            ->orderBy('record_at', 'DESC')
             ->paginate($pageSize);
 
         $data = $records->items();
