@@ -34,7 +34,11 @@ $frontendViewData = function (Request $request) {
     }
 
     $renderParams['theme_config'] = config('theme.' . config('v2board.frontend_theme', 'default'));
-    return view('theme::' . config('v2board.frontend_theme', 'default') . '.dashboard', $renderParams);
+    return response()
+        ->view('theme::' . config('v2board.frontend_theme', 'default') . '.dashboard', $renderParams)
+        ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        ->header('Pragma', 'no-cache')
+        ->header('Expires', '0');
 };
 
 Route::get('/', $frontendViewData);
