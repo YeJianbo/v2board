@@ -325,6 +325,84 @@
       background: var(--bc-primary);
       color: #fff;
     }
+    .bc-docs-panel {
+      margin: 16px 0 24px;
+      color: var(--bc-text);
+    }
+    .bc-docs-hero {
+      margin-bottom: 14px;
+      padding: 18px 20px;
+      border: 1px solid var(--bc-border);
+      border-radius: 12px;
+      background: var(--bc-surface);
+      box-shadow: 0 10px 28px rgba(15, 23, 42, .06);
+    }
+    .bc-docs-kicker {
+      margin-bottom: 6px;
+      color: var(--bc-primary);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .bc-docs-title {
+      margin: 0 0 8px;
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    .bc-docs-lead {
+      margin: 0;
+      color: var(--bc-text-soft);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+    .bc-docs-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .bc-docs-card {
+      padding: 16px;
+      border: 1px solid var(--bc-border);
+      border-radius: 12px;
+      background: var(--bc-surface);
+      box-shadow: 0 8px 22px rgba(15, 23, 42, .05);
+    }
+    .bc-docs-card h3 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    .bc-docs-card ol,
+    .bc-docs-card ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--bc-text-soft);
+      font-size: 13px;
+      line-height: 1.75;
+    }
+    .bc-docs-card li + li {
+      margin-top: 5px;
+    }
+    .bc-docs-tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .bc-docs-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid var(--bc-primary-soft);
+      border-radius: 999px;
+      background: rgba(34, 197, 94, .08);
+      color: var(--bc-primary-strong);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
     @media (max-width: 768px) {
       .bc-node-traffic-table-toolbar {
         align-items: flex-end;
@@ -345,6 +423,14 @@
         justify-content: flex-start;
         overflow-x: auto;
       }
+      .bc-docs-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .bc-docs-hero,
+      .bc-docs-card {
+        border-radius: 10px;
+        padding: 14px;
+      }
     }
   </style>
   <script>
@@ -359,6 +445,7 @@
       var nodeTrafficAuthRetry = 0
       var nodeTrafficLastFailedAt = 0
       var subscribePatchTimer = 0
+      var docsPatchTimer = 0
       var nodeTrafficRenderCache = {}
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
@@ -874,6 +961,91 @@
         subscribePatchTimer = window.setTimeout(function () {
           subscribePatchTimer = 0
           patchSubscribeModal()
+        }, 120)
+      }
+
+      function isDocsRoute() {
+        var hash = String(window.location.hash || '').toLowerCase()
+        var path = String(window.location.pathname || '').toLowerCase()
+        if (hash.indexOf('/knowledge') !== -1 || hash.indexOf('/docs') !== -1 || hash.indexOf('/document') !== -1) return true
+        if (path === '/knowledge' || path === '/docs' || path === '/document') return true
+        var title = findTopTitle()
+        return !!title && textOf(title) === '使用文档'
+      }
+
+      function getDocsHtml() {
+        return '<section class="bc-docs-panel" data-bc-docs-panel="1">' +
+          '<div class="bc-docs-hero">' +
+          '<div class="bc-docs-kicker">BunCloud 使用文档</div>' +
+          '<h2 class="bc-docs-title">快速完成订阅导入和日常排障</h2>' +
+          '<p class="bc-docs-lead">推荐优先使用页面里的“一键导入”。如果客户端没有响应，再复制订阅地址到客户端内手动添加。订阅地址属于账号凭证，不要发给他人。</p>' +
+          '<div class="bc-docs-tag-row">' +
+          '<span class="bc-docs-tag">Windows</span><span class="bc-docs-tag">Android</span><span class="bc-docs-tag">Clash Verge Rev</span><span class="bc-docs-tag">NekoBox</span><span class="bc-docs-tag">FlClash</span><span class="bc-docs-tag">sing-box</span>' +
+          '</div>' +
+          '</div>' +
+          '<div class="bc-docs-grid">' +
+          '<article class="bc-docs-card"><h3>1. 获取订阅</h3><ol><li>进入仪表盘，点击订阅或导入按钮。</li><li>按当前设备选择对应客户端导入。</li><li>客户端导入后先更新订阅，再选择节点连接。</li></ol></article>' +
+          '<article class="bc-docs-card"><h3>2. Windows 客户端</h3><ul><li>Clash Verge Rev：使用“导入到 Clash Verge Rev”，适合 Meta 系列配置。</li><li>v2rayN：导入后检查系统代理和路由模式。</li><li>sing-box / FlClash：导入失败时复制订阅地址手动添加远程配置。</li></ul></article>' +
+          '<article class="bc-docs-card"><h3>3. Android 客户端</h3><ul><li>CMFA、NekoBox、Surfboard、FlClash 会按安卓设备优先显示。</li><li>导入后请在客户端内更新订阅，确认节点列表刷新完成。</li><li>移动网络和 Wi-Fi 切换后，建议重新连接一次节点。</li></ul></article>' +
+          '<article class="bc-docs-card"><h3>4. 连接异常排查</h3><ul><li>先更新订阅，确认不是旧配置。</li><li>换同协议其他节点测试，区分节点问题和本机网络问题。</li><li>Reality、HY2、TUIC 等协议需要较新的客户端内核。</li></ul></article>' +
+          '<article class="bc-docs-card"><h3>5. 流量明细</h3><ul><li>在“流量明细”查看按节点统计的实际用量和倍率。</li><li>可按小时或天查看，也可以设置时间范围。</li><li>客户端显示流量和面板扣费流量可能因倍率不同而不一致。</li></ul></article>' +
+          '<article class="bc-docs-card"><h3>6. 账号安全</h3><ul><li>订阅地址泄露后，别人可以直接使用你的流量。</li><li>发现异常流量，先重置订阅或联系管理员处理。</li><li>不要在公开截图中展示完整 token、订阅链接或二维码。</li></ul></article>' +
+          '</div>' +
+          '</section>'
+      }
+
+      function removeDocsPanel() {
+        Array.prototype.slice.call(document.querySelectorAll('[data-bc-docs-panel="1"]')).forEach(function (node) {
+          node.remove()
+        })
+      }
+
+      function findDocsInsertHost() {
+        var title = findTopTitle()
+        if (!title || textOf(title) !== '使用文档') return null
+        var layout = measureLayout()
+        var current = title
+        for (var i = 0; i < 7 && current && current.parentElement; i += 1) {
+          var parent = current.parentElement
+          var rect = parent.getBoundingClientRect()
+          if (rect.width >= 280 && rect.left >= layout.left - 24 && rect.top >= layout.top - 36) {
+            if (parent.children && parent.children.length <= 3) return parent.parentElement || parent
+            return parent
+          }
+          current = parent
+        }
+        return title.parentElement || null
+      }
+
+      function patchDocsPage() {
+        if (!isDocsRoute()) {
+          removeDocsPanel()
+          return
+        }
+        if (document.querySelector('[data-bc-docs-panel="1"]')) return
+        var host = findDocsInsertHost()
+        if (!host) return
+        var wrapper = document.createElement('div')
+        wrapper.innerHTML = getDocsHtml()
+        var panel = wrapper.firstElementChild
+        var title = findTopTitle()
+        if (title) {
+          var titleBlock = title
+          for (var i = 0; i < 3 && titleBlock.parentElement && titleBlock.parentElement !== host; i += 1) {
+            titleBlock = titleBlock.parentElement
+          }
+          if (titleBlock.parentElement === host && titleBlock.nextSibling) host.insertBefore(panel, titleBlock.nextSibling)
+          else host.appendChild(panel)
+        } else {
+          host.appendChild(panel)
+        }
+      }
+
+      function scheduleDocsPatch() {
+        if (docsPatchTimer) return
+        docsPatchTimer = window.setTimeout(function () {
+          docsPatchTimer = 0
+          patchDocsPage()
         }, 120)
       }
 
@@ -1395,10 +1567,12 @@
 
       function handleRouteChange() {
         removeNodeTrafficInlineControls()
+        removeDocsPanel()
         setTopTitleActive(false)
         syncMenuState(false)
         updateTrafficRouteClass()
         schedulePatch()
+        scheduleDocsPatch()
       }
 
       function removeLegacyNodeTrafficMenu() {
@@ -1411,6 +1585,7 @@
         updateTrafficRouteClass()
         schedulePatch()
         scheduleSubscribePatch()
+        scheduleDocsPatch()
       }
 
       var observer = new MutationObserver(handleMutation)
@@ -1424,6 +1599,7 @@
       setInterval(function () {
         if (!isTrafficRoute()) removeNodeTrafficInlineControls()
         scheduleSubscribePatch()
+        scheduleDocsPatch()
       }, 1500)
     })()
   </script>
