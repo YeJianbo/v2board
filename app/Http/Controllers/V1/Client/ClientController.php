@@ -25,6 +25,7 @@ class ClientController extends Controller
         if ($userService->isAvailable($user)) {
             $serverService = new ServerService();
             $servers = $serverService->getAvailableServers($user);
+            $servers = $this->filterServersByRequest($servers, $request);
             if($flag) {
                 if (!strpos($flag, 'sing')) {
                     $this->setSubscribeInfoToServers($servers, $user);
@@ -52,6 +53,113 @@ class ClientController extends Controller
             $class = new General($user, $servers);
             return $class->handle();
         }
+    }
+
+    private function filterServersByRequest(array $servers, Request $request): array
+    {
+        $include = $this->normalizeFilterTerms(
+            $request->input('filter', $request->input('include', ''))
+        );
+        $exclude = $this->normalizeFilterTerms($request->input('exclude', ''));
+
+        if (!$include && !$exclude) {
+            return $servers;
+        }
+
+        return array_values(array_filter($servers, function ($server) use ($include, $exclude) {
+            if ($include && !$this->serverMatchesAnyTerm($server, $include)) {
+                return false;
+            }
+
+            if ($exclude && $this->serverMatchesAnyTerm($server, $exclude)) {
+                return false;
+            }
+
+            return true;
+        }));
+    }
+
+    private function normalizeFilterTerms($value): array
+    {
+        $items = is_array($value) ? $value : [$value];
+        $terms = [];
+
+        foreach ($items as $item) {
+            if (is_array($item)) {
+                $terms = array_merge($terms, $this->normalizeFilterTerms($item));
+                continue;
+            }
+
+            $parts = preg_split('/[\s,，|｜;；]+/u', (string)$item) ?: [];
+            foreach ($parts as $part) {
+                $term = $this->normalizeFilterText($part);
+                if ($term === '' || $term === '*' || $term === 'all') {
+                    continue;
+                }
+                $terms[] = $term;
+            }
+        }
+
+        return array_values(array_unique(array_slice($terms, 0, 20)));
+    }
+
+    private function serverMatchesAnyTerm(array $server, array $terms): bool
+    {
+        $searchText = $this->buildServerSearchText($server);
+        foreach ($terms as $term) {
+            if ($term !== '' && strpos($searchText, $term) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function buildServerSearchText(array $server): string
+    {
+        $type = (string)($server['protocol'] ?? $server['type'] ?? '');
+        $fields = [
+            $server['name'] ?? '',
+            $server['host'] ?? '',
+            $server['type'] ?? '',
+            $server['protocol'] ?? '',
+            $server['country'] ?? '',
+            $server['country_code'] ?? '',
+            $server['rate'] ?? '',
+        ];
+
+        foreach ($this->protocolAliases($type) as $alias) {
+            $fields[] = $alias;
+        }
+
+        return $this->normalizeFilterText(implode(' ', array_filter(array_map('strval', $fields))));
+    }
+
+    private function protocolAliases(string $type): array
+    {
+        $type = $this->normalizeFilterText($type);
+        $aliases = [
+            'hysteria' => ['hy', 'hy2', 'hysteria2'],
+            'hysteria2' => ['hy', 'hy2', 'hysteria'],
+            'shadowsocks' => ['ss'],
+            'vmess' => ['vmess'],
+            'vless' => ['vless', 'reality'],
+            'trojan' => ['trojan'],
+            'tuic' => ['tuic'],
+            'anytls' => ['anytls', 'any'],
+        ];
+
+        return $aliases[$type] ?? [];
+    }
+
+    private function normalizeFilterText(string $value): string
+    {
+        $value = trim($value);
+        $value = function_exists('mb_strtolower')
+            ? mb_strtolower($value, 'UTF-8')
+            : strtolower($value);
+
+        return $value;
     }
 
     private function setSubscribeInfoToServers(&$servers, $user)

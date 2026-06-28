@@ -88,6 +88,22 @@ HTML,
 HTML,
             ],
             [
+                'category' => '订阅',
+                'title' => '订阅线路筛选',
+                'sort' => 55,
+                'body' => <<<'HTML'
+<h2>订阅线路筛选</h2>
+<p>如果客户端支持添加多个订阅，可以在订阅地址后增加筛选参数，只拉取指定地区或协议的节点。</p>
+<ul>
+  <li><code>&amp;filter=香港</code>：只保留名称、协议或入口信息中包含“香港”的节点。</li>
+  <li><code>&amp;filter=hy2</code>：只保留 Hysteria2 / HY2 节点。</li>
+  <li><code>&amp;filter=reality</code>：只保留 VLESS Reality 节点。</li>
+  <li><code>&amp;filter=香港|日本&amp;exclude=anytls</code>：保留香港或日本节点，同时排除 AnyTLS。</li>
+</ul>
+<p>多个关键词可用逗号、竖线或空格分隔。不加筛选参数时，订阅内容保持完整。</p>
+HTML,
+            ],
+            [
                 'category' => '安全',
                 'title' => '订阅安全说明',
                 'sort' => 60,

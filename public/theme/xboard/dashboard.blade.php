@@ -1013,7 +1013,8 @@
           '<article class="bc-docs-card"><h3>3. Android 客户端</h3><ul><li>CMFA、NekoBox、Surfboard、FlClash 会按安卓设备优先显示。</li><li>导入后请在客户端内更新订阅，确认节点列表刷新完成。</li><li>移动网络和 Wi-Fi 切换后，建议重新连接一次节点。</li></ul></article>' +
           '<article class="bc-docs-card"><h3>4. 连接异常排查</h3><ul><li>先更新订阅，确认不是旧配置。</li><li>换同协议其他节点测试，区分节点问题和本机网络问题。</li><li>Reality、HY2、TUIC 等协议需要较新的客户端内核。</li></ul></article>' +
           '<article class="bc-docs-card"><h3>5. 流量明细</h3><ul><li>在“流量明细”查看按节点统计的实际用量和倍率。</li><li>可按小时或天查看，也可以设置时间范围。</li><li>客户端显示流量和面板扣费流量可能因倍率不同而不一致。</li></ul></article>' +
-          '<article class="bc-docs-card"><h3>6. 账号安全</h3><ul><li>订阅地址泄露后，别人可以直接使用你的流量。</li><li>发现异常流量，先重置订阅或联系管理员处理。</li><li>不要在公开截图中展示完整 token、订阅链接或二维码。</li></ul></article>' +
+          '<article class="bc-docs-card"><h3>6. 订阅筛选</h3><ul><li>在订阅地址后加 <code>&amp;filter=香港</code> 可只拉取香港节点。</li><li><code>&amp;filter=hy2</code> 只拉取 HY2，<code>&amp;filter=reality</code> 只拉取 VLESS Reality。</li><li>多个关键词可用逗号、竖线或空格分隔，也可用 <code>&amp;exclude=anytls</code> 排除协议。</li></ul></article>' +
+          '<article class="bc-docs-card"><h3>7. 账号安全</h3><ul><li>订阅地址泄露后，别人可以直接使用你的流量。</li><li>发现异常流量，先重置订阅或联系管理员处理。</li><li>不要在公开截图中展示完整 token、订阅链接或二维码。</li></ul></article>' +
           '</div>' +
           '</section>'
       }
