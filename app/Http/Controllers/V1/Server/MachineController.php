@@ -559,6 +559,29 @@ class MachineController extends Controller
         
         $remoteIp = $this->resolveRequestRemoteIp($request);
         $reportedIp = trim((string) ($data['ip'] ?? ''));
+        $stringStatusKeys = [
+            'os',
+            'kernel',
+            'arch',
+            'cpu_model',
+            'v2node_status',
+            'gost_status',
+            'gost_version',
+            'listen_ports',
+        ];
+        $numericStatusKeys = [
+            'load1',
+            'load5',
+            'load15',
+            'cpu_cores',
+            'mem_total',
+            'mem_used',
+            'disk_total',
+            'disk_used',
+            'docker_total',
+            'docker_running',
+            'gost_rule_count',
+        ];
 
         $status = [
             'cpu' => $data['cpu'] ?? 0,
@@ -577,6 +600,18 @@ class MachineController extends Controller
             'ddns_synced_at' => !empty($data['ddns_synced_at']) ? (int) $data['ddns_synced_at'] : null,
             'ddns_error' => array_key_exists('ddns_error', $data) ? trim((string) $data['ddns_error']) : null,
         ];
+
+        foreach ($numericStatusKeys as $key) {
+            if (array_key_exists($key, $data) && is_numeric($data[$key])) {
+                $status[$key] = $data[$key] + 0;
+            }
+        }
+
+        foreach ($stringStatusKeys as $key) {
+            if (array_key_exists($key, $data)) {
+                $status[$key] = mb_substr(trim((string) $data[$key]), 0, 255);
+            }
+        }
         
         $this->touchMachineHeartbeat($machine, $request, $status);
 

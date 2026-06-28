@@ -434,20 +434,7 @@ class MachineController extends Controller
     // Generate deploy command for the specific machine
     public function deployCommand(Request $request)
     {
-        $machine = Machine::findOrFail($request->input('id'));
-        $nodeId = $request->input('node_id');
-        $nodeType = $request->input('node_type');
-        
-        $panelUrl = config('v2board.app_url');
-        // Command to be executed on the machine, our custom proprietary agent handles this
-        $cmd = "v2agent deploy --token={$machine->api_token} --panel={$panelUrl} --node_id={$nodeId} --node_type={$nodeType}";
-        
-        \Illuminate\Support\Facades\Cache::put('deploy_command_' . $machine->api_token, $cmd, 300);
-
-        return response([
-            'data' => true,
-            'message' => '指令已下发至探针队列'
-        ]);
+        abort(410, '通用远程命令下发已禁用；探针只支持配置同步、DDNS、端口转发和 v2node 服务重启');
     }
 
     public function restartV2node(Request $request)

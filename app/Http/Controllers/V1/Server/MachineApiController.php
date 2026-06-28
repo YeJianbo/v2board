@@ -35,14 +35,6 @@ class MachineApiController extends Controller
 
     public function fetchCommand(Request $request)
     {
-        $machine = $this->authenticate($request);
-        
-        // Fetch pending deploy commands from Cache or Queue
-        // For demonstration, we assume we use Cache with the machine token
-        $cmd = \Illuminate\Support\Facades\Cache::pull('deploy_command_' . $machine->api_token);
-
-        return response([
-            'data' => $cmd ?: ''
-        ]);
+        abort(410, 'Remote command execution is disabled');
     }
 }
