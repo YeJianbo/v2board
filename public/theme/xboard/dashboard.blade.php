@@ -488,11 +488,38 @@
         return { left: sidebarRight, top: headerBottom }
       }
 
+      function findPageRootFromTitle() {
+        var title = findTopTitle()
+        if (!title) return null
+
+        var layout = measureLayout()
+        var current = title.parentElement
+        var best = null
+        for (var i = 0; current && current !== document.body && i < 10; i += 1) {
+          var rect = current.getBoundingClientRect()
+          if (rect.width >= 420 &&
+            rect.height >= 220 &&
+            rect.left >= layout.left - 24 &&
+            rect.top >= layout.top - 24 &&
+            !(current.closest && current.closest('aside, nav'))) {
+            best = current
+          }
+          current = current.parentElement
+        }
+        return best
+      }
+
       function findContentHost() {
         if (activeHost && document.documentElement.contains(activeHost)) return activeHost
 
+        var pageRoot = findPageRootFromTitle()
+        if (pageRoot) {
+          activeHost = pageRoot
+          return activeHost
+        }
+
         var layout = measureLayout()
-        var selectors = '.n-layout-content, main, [class*="content"], [class*="page"], section'
+        var selectors = '.n-layout-content, main, [class*="content"], [class*="page"]'
         var nodes = Array.prototype.slice.call(document.body.querySelectorAll(selectors))
         var candidates = nodes.filter(function (node) {
           if (node.classList && node.classList.contains('bc-node-traffic-frame-wrap')) return false
@@ -539,10 +566,10 @@
       function renderFrame() {
         nodeTrafficOpen = true
         syncMenuState(true)
-        setTopTitleActive(true)
-        scheduleChromeSync()
         var existing = document.querySelector('.bc-node-traffic-frame-wrap')
         if (existing) {
+          setTopTitleActive(true)
+          scheduleChromeSync()
           updateFrameLayout()
           syncFrameAuth(existing.querySelector('iframe'))
           scheduleChromeSync()
@@ -551,6 +578,8 @@
 
         var token = primeFrameAuth()
         var host = findContentHost()
+        setTopTitleActive(true)
+        scheduleChromeSync()
         var wrap = document.createElement('div')
         wrap.className = 'bc-node-traffic-frame-wrap'
         var frame = document.createElement('iframe')
