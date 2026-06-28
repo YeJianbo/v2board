@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>节点流量明细</title>
+  <title>流量明细</title>
   <style>
     :root {
       color-scheme: light;
@@ -122,7 +122,7 @@
     }
     .summary {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 10px;
       padding: 14px 18px 0;
     }
@@ -282,12 +282,11 @@
   <main class="page">
     <header class="topbar">
       <div>
-        <h1>节点流量明细</h1>
-        <p class="sub">按节点查看个人用量、倍率扣费和时间曲线。</p>
+        <h1>流量明细</h1>
+        <p class="sub">按节点查看实际用量、倍率和计费流量。</p>
       </div>
       <div class="toolbar">
         <div class="segmented" id="periods">
-          <button data-period="minute">分钟</button>
           <button data-period="hour">小时</button>
           <button data-period="day" class="active">天</button>
         </div>
@@ -298,13 +297,14 @@
     <section class="grid">
       <div class="card">
         <div class="card-head">
-          <h2 class="card-title">用量曲线</h2>
+          <h2 class="card-title">节点用量曲线</h2>
           <span class="status" id="status">准备加载</span>
         </div>
         <div class="summary">
-          <div class="metric"><span>总流量</span><strong id="totalTraffic">0 B</strong></div>
-          <div class="metric"><span>上行</span><strong id="uploadTraffic">0 B</strong></div>
-          <div class="metric"><span>下行</span><strong id="downloadTraffic">0 B</strong></div>
+          <div class="metric"><span>实际使用</span><strong id="totalTraffic">0 B</strong></div>
+          <div class="metric"><span>实际上行</span><strong id="uploadTraffic">0 B</strong></div>
+          <div class="metric"><span>实际下行</span><strong id="downloadTraffic">0 B</strong></div>
+          <div class="metric"><span>计费流量</span><strong id="billedTraffic">0 B</strong></div>
         </div>
         <div class="chart-wrap">
           <canvas id="chart" width="900" height="360"></canvas>
@@ -328,10 +328,10 @@
             <th>节点</th>
             <th>协议</th>
             <th>倍率</th>
-            <th>上行</th>
-            <th>下行</th>
-            <th>合计</th>
-            <th>扣费</th>
+            <th>实际上行</th>
+            <th>实际下行</th>
+            <th>实际使用</th>
+            <th>计费流量</th>
           </tr>
         </thead>
         <tbody id="logRows"></tbody>
@@ -465,7 +465,7 @@
               <span>${escapeHtml(node.name || `Node ${node.server_id || ''}`)}</span>
               <span class="node-type">${escapeHtml(node.type || '')}</span>
             </span>
-            <span class="node-meta">${formatBytes(node.total)} / 扣费 ${formatBytes(node.cost)}</span>
+            <span class="node-meta">倍率 x ${Number(node.rate || 1).toFixed(2)} / 实际 ${formatBytes(node.total)} / 计费 ${formatBytes(node.cost)}</span>
           </span>
         </label>
       `).join('');
@@ -484,9 +484,11 @@
       const total = rows.reduce((sum, item) => sum + Number(item.total || 0), 0);
       const upload = rows.reduce((sum, item) => sum + Number(item.u || 0), 0);
       const download = rows.reduce((sum, item) => sum + Number(item.d || 0), 0);
+      const billed = rows.reduce((sum, item) => sum + Number(item.cost || 0), 0);
       document.getElementById('totalTraffic').textContent = formatBytes(total);
       document.getElementById('uploadTraffic').textContent = formatBytes(upload);
       document.getElementById('downloadTraffic').textContent = formatBytes(download);
+      document.getElementById('billedTraffic').textContent = formatBytes(billed);
     }
 
     function drawChart(payload) {

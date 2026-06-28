@@ -57,16 +57,13 @@
       background: transparent !important;
       box-shadow: none !important;
     }
-    .bc-node-traffic-menu {
-      cursor: pointer;
-    }
-    .bc-node-traffic-menu.is-active {
-      color: var(--bc-primary-strong);
+    html.bc-user-polish .bc-node-traffic-content-host > :not(.bc-node-traffic-frame-wrap) {
+      display: none !important;
     }
     .bc-node-traffic-frame-wrap {
       display: block;
       width: 100%;
-      margin-top: 18px;
+      margin-top: 0;
       min-height: 540px;
       padding: 0;
       background: transparent;
@@ -96,16 +93,6 @@
       color: var(--bc-text-soft);
       font-size: 12px;
       line-height: 1.5;
-    }
-    .bc-node-traffic-close {
-      flex: 0 0 auto;
-      height: 32px;
-      padding: 0 12px;
-      border: 1px solid var(--bc-line-strong);
-      border-radius: 6px;
-      background: var(--bc-panel);
-      color: var(--bc-text);
-      cursor: pointer;
     }
     .bc-node-traffic-frame {
       width: 100%;
@@ -175,7 +162,7 @@
     (function () {
       document.documentElement.classList.add('bc-user-polish')
       var pageUrl = '/user-node-traffic.html'
-      var menuText = '节点流量明细'
+      var menuText = '流量明细'
       var nodeTrafficOpen = false
       var activeTitle = null
       var activeFrame = null
@@ -245,19 +232,6 @@
         })
       }
 
-      function openNodeTraffic() {
-        var traffic = findTrafficMenu()
-        var root = traffic ? clickableRoot(traffic) : null
-        if (root && !root.classList.contains('bc-node-traffic-menu')) {
-          root.dispatchEvent(new MouseEvent('click', {
-            bubbles: true,
-            cancelable: true,
-            view: window
-          }))
-        }
-        ensureNodeTrafficInline(0, true)
-      }
-
       function ensureNodeTrafficInline(attempt, shouldScroll) {
         var title = findTopTitle()
         if (title && textOf(title) === '流量明细') {
@@ -295,8 +269,6 @@
       }
 
       function syncMenuState(active) {
-        var menu = document.querySelector('.bc-node-traffic-menu')
-        if (menu) menu.classList.toggle('is-active', !!active)
         document.body.classList.toggle('bc-node-traffic-open', !!active)
         Array.prototype.slice.call(document.querySelectorAll('.n-menu-item-content--selected')).forEach(function (node) {
           if (!node.dataset.bcWasSelected) node.dataset.bcWasSelected = '1'
@@ -386,7 +358,7 @@
         if (insertMenuTimer) return
         insertMenuTimer = window.setTimeout(function () {
           insertMenuTimer = 0
-          insertNodeTrafficMenu()
+          removeLegacyNodeTrafficMenu()
           ensureNodeTrafficInline(0)
           patchSubscribeImports()
         }, 80)
@@ -678,15 +650,7 @@
         wrap.className = 'bc-node-traffic-frame-wrap'
         var head = document.createElement('div')
         head.className = 'bc-node-traffic-inline-head'
-        head.innerHTML = '<div><h2 class="bc-node-traffic-inline-title">节点流量明细</h2><p class="bc-node-traffic-inline-desc">按节点查看个人用量、协议、扣费和时间曲线。</p></div>'
-        var closeButton = document.createElement('button')
-        closeButton.className = 'bc-node-traffic-close'
-        closeButton.type = 'button'
-        closeButton.textContent = '收起'
-        closeButton.addEventListener('click', function () {
-          closeNodeTraffic()
-        })
-        head.appendChild(closeButton)
+        head.innerHTML = '<div><h2 class="bc-node-traffic-inline-title">流量明细</h2><p class="bc-node-traffic-inline-desc">按节点查看实际用量、倍率和计费流量。</p></div>'
         var frame = document.createElement('iframe')
         frame.className = 'bc-node-traffic-frame'
         frame.src = buildFrameUrl(token)
@@ -697,6 +661,9 @@
         wrap.appendChild(head)
         wrap.appendChild(frame)
         host.appendChild(wrap)
+        if (host !== document.body && host.id !== 'app') {
+          host.classList.add('bc-node-traffic-content-host')
+        }
         activeHost = host
         activeFrame = frame
         updateFrameLayout()
@@ -706,38 +673,10 @@
         if (shouldScroll) wrap.scrollIntoView({ block: 'start', behavior: 'smooth' })
       }
 
-      function insertNodeTrafficMenu() {
-        var existingMenu = document.querySelector('.bc-node-traffic-menu')
-        if (existingMenu) {
-          if (nodeTrafficOpen) {
-            syncMenuState(true)
-            updateFrameLayout()
-            scheduleChromeSync()
-          }
-          return
-        }
-
-        var traffic = findTrafficMenu()
-        if (!traffic) return
-
-        var root = clickableRoot(traffic)
-        var item = root.cloneNode(true)
-        resetClonedMenuState(item)
-        item.classList.add('bc-node-traffic-menu')
-        item.removeAttribute('aria-current')
-        item.removeAttribute('data-v-traffic-menu')
-        if (item.tagName === 'A') item.href = 'javascript:void(0)'
-        Array.prototype.slice.call(item.querySelectorAll('a')).forEach(function (link) {
-          link.href = 'javascript:void(0)'
+      function removeLegacyNodeTrafficMenu() {
+        Array.prototype.slice.call(document.querySelectorAll('.bc-node-traffic-menu')).forEach(function (node) {
+          node.remove()
         })
-        replaceMenuText(item, menuText)
-        item.addEventListener('click', function (event) {
-          event.preventDefault()
-          event.stopPropagation()
-          openNodeTraffic()
-        })
-
-        if (root.parentElement) root.parentElement.insertBefore(item, root.nextSibling)
       }
 
       var observer = new MutationObserver(schedulePatch)
