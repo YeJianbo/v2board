@@ -53,10 +53,6 @@
       --bc-shadow-md: 0 4px 16px rgba(42, 37, 32, .06), 0 12px 32px rgba(42, 37, 32, .04);
       color-scheme: light;
     }
-    html.bc-user-polish body.bc-node-traffic-open .n-menu-item-content--selected {
-      background: transparent !important;
-      box-shadow: none !important;
-    }
     .bc-node-traffic-table-toolbar {
       display: flex;
       align-items: center;
@@ -321,6 +317,8 @@
       function findLegacyTrafficTable() {
         var tables = Array.prototype.slice.call(document.querySelectorAll('table'))
         return tables.find(function (table) {
+          var rect = table.getBoundingClientRect()
+          if (!rect.width || !rect.height) return false
           if (table.dataset && table.dataset.bcNodeTrafficTable === '1') return true
           var text = textOf(table)
           return text.indexOf('记录时间') !== -1 &&
@@ -399,7 +397,7 @@
                 var childJwt = child.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)
                 if (childJwt && !stack.token) stack.token = childJwt[0]
                 if (['auth_data', 'authorization', 'token', 'access_token'].indexOf(lower) !== -1 && child.length > 20 && !stack.token) {
-                  if (lower !== 'token') stack.token = child
+                  stack.token = child
                 }
               } else if (child && typeof child === 'object') {
                 stack.push(child)
@@ -413,6 +411,10 @@
       }
 
       function getAuthToken() {
+        try {
+          var urlToken = new URLSearchParams(window.location.search).get('auth_data')
+          if (urlToken) return urlToken
+        } catch (error) {}
         var stores = [window.localStorage, window.sessionStorage]
         var priorityKeys = ['Vue_Naive_access_token', 'access_token', 'auth_data', 'authorization', 'token', 'user_token']
         for (var s = 0; s < stores.length; s += 1) {
@@ -490,7 +492,9 @@
       function ensureTrafficToolbar(table) {
         var parent = table.parentElement
         if (!parent) return null
-        var toolbar = parent.querySelector(':scope > .bc-node-traffic-table-toolbar')
+        var toolbar = Array.prototype.slice.call(parent.children).find(function (child) {
+          return child.classList && child.classList.contains('bc-node-traffic-table-toolbar')
+        })
         if (!toolbar) {
           toolbar = document.createElement('div')
           toolbar.className = 'bc-node-traffic-table-toolbar'
