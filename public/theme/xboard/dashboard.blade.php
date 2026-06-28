@@ -284,6 +284,7 @@
       var capturedAuthToken = ''
       var nodeTrafficAuthRetry = 0
       var nodeTrafficLastFailedAt = 0
+      var subscribePatchTimer = 0
       var nodeTrafficRenderCache = {}
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
@@ -689,6 +690,7 @@
       }
 
       function patchSubscribeModal() {
+        if (!document.querySelector('.n-modal, [role="dialog"]')) return
         var lists = Array.prototype.slice.call(document.querySelectorAll('.n-modal .n-list, [role="dialog"] .n-list'))
         lists.forEach(function (list) {
           var text = textOf(list)
@@ -707,6 +709,14 @@
             list.insertBefore(createSubscribeImportItem('v2rayNG', 'v2rayng', 'V'), insertAfter)
           }
         })
+      }
+
+      function scheduleSubscribePatch() {
+        if (subscribePatchTimer) return
+        subscribePatchTimer = window.setTimeout(function () {
+          subscribePatchTimer = 0
+          patchSubscribeModal()
+        }, 120)
       }
 
       function escapeHtml(value) {
@@ -1182,7 +1192,7 @@
 
       function handleMutation() {
         schedulePatch()
-        patchSubscribeModal()
+        scheduleSubscribePatch()
       }
 
       var observer = new MutationObserver(handleMutation)
@@ -1194,8 +1204,8 @@
       setTimeout(handleMutation, 2000)
       setInterval(function () {
         if (!isTrafficRoute()) removeNodeTrafficInlineControls()
-        patchSubscribeModal()
-      }, 300)
+        scheduleSubscribePatch()
+      }, 1500)
     })()
   </script>
   {!! $theme_config['custom_html'] !!}
