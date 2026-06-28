@@ -963,7 +963,8 @@
         var lists = Array.prototype.slice.call(document.querySelectorAll('.n-modal .n-list, [role="dialog"] .n-list'))
         lists.forEach(function (list) {
           var text = textOf(list)
-          if (text.indexOf('复制订阅地址') === -1 || text.indexOf('ClashVergeRev') === -1) return
+          if (text.indexOf('复制订阅地址') === -1) return
+          if (text.indexOf('扫描二维码订阅') === -1 && text.indexOf('不会使用') === -1 && text.indexOf('导入到') === -1) return
           normalizeSubscribeClientLabels(list)
           ensurePlatformSubscribeClients(list)
         })
