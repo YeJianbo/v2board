@@ -218,14 +218,46 @@
     html.embedded .page {
       width: 100%;
       margin: 0;
-      padding: 24px 24px 34px;
+      padding: 18px 22px 30px;
+    }
+    html.embedded .topbar {
+      justify-content: flex-end;
+      margin-bottom: 12px;
+    }
+    html.embedded .topbar > div:first-child {
+      display: none;
+    }
+    html.embedded .toolbar {
+      margin-left: auto;
+    }
+    html.embedded .grid {
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 14px;
     }
     html.embedded .card {
       box-shadow: none;
     }
+    html.embedded .chart-wrap {
+      padding: 14px 18px 18px;
+    }
+    html.embedded .summary {
+      padding-top: 14px;
+    }
+    html.embedded canvas {
+      height: 330px;
+    }
+    html.embedded .node-list {
+      max-height: 500px;
+    }
     @media (max-width: 900px) {
       html.embedded .page {
         padding: 18px 14px 28px;
+      }
+      html.embedded .topbar {
+        justify-content: flex-start;
+      }
+      html.embedded .grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -309,7 +341,7 @@
     };
 
     const isEmbedded = new URLSearchParams(location.search).get('embed') === '1';
-    const colors = ['#0f766e', '#2563eb', '#dc2626', '#7c3aed', '#ea580c', '#0891b2', '#4d7c0f', '#be123c'];
+    const colors = ['#c94f2e', '#d99c5c', '#6b8f5e', '#8a7460', '#a83d20', '#b45309', '#4f7c62', '#9f6b53'];
 
     function formatBytes(value) {
       const bytes = Number(value || 0);
