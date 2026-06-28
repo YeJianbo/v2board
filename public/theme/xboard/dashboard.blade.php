@@ -183,52 +183,6 @@
       color: var(--bc-text-soft);
       text-align: center;
     }
-    .bc-sub-import-row {
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      min-height: 64px;
-      padding: 10px 20px;
-      color: var(--bc-text);
-      cursor: pointer;
-      border-top: 1px solid var(--bc-line);
-      transition: background .15s ease, color .15s ease;
-    }
-    .bc-sub-import-row:hover {
-      background: var(--bc-primary-soft);
-      color: var(--bc-primary-strong);
-    }
-    .bc-sub-import-icon {
-      display: grid;
-      place-items: center;
-      flex: 0 0 auto;
-      width: 40px;
-      height: 40px;
-      border-radius: 8px;
-      background: var(--bc-primary-soft);
-      color: var(--bc-primary-strong);
-      font-size: 12px;
-      font-weight: 800;
-      line-height: 1.05;
-      text-align: center;
-    }
-    .bc-sub-import-icon img {
-      display: block;
-      width: 28px;
-      height: 28px;
-      object-fit: contain;
-    }
-    .bc-sub-import-main {
-      min-width: 0;
-      font-size: 16px;
-      line-height: 1.35;
-    }
-    .bc-sub-import-main small {
-      display: block;
-      margin-top: 2px;
-      color: var(--bc-text-soft);
-      font-size: 12px;
-    }
     @media (max-width: 768px) {
       .bc-node-traffic-table-toolbar {
         align-items: stretch;
@@ -245,7 +199,6 @@
       var menuText = '流量明细'
       var activeTitle = null
       var insertMenuTimer = 0
-      var subscribeDataPromise = null
       var nodeTrafficPeriod = 'day'
       var nodeTrafficRequestId = 0
       var capturedAuthToken = ''
@@ -743,59 +696,6 @@
         return true
       }
 
-      function getSubscribeData() {
-        if (subscribeDataPromise) return subscribeDataPromise
-        var token = getAuthToken()
-        if (!token) return Promise.resolve(null)
-        subscribeDataPromise = fetch('/api/v1/user/getSubscribe', {
-          headers: { Authorization: token }
-        }).then(function (response) {
-          if (!response.ok) throw new Error('getSubscribe ' + response.status)
-          return response.json()
-        }).then(function (payload) {
-          return payload && payload.data ? payload.data : null
-        }).catch(function () {
-          subscribeDataPromise = null
-          return null
-        })
-        return subscribeDataPromise
-      }
-
-      function importRows(subscribeUrl) {
-        var encodedUrl = encodeURIComponent(subscribeUrl)
-        var title = encodeURIComponent((window.settings && window.settings.title) || document.title || 'Subscription')
-        return [
-          {
-            id: 'clash-verge',
-            icon: '<img src="/theme/xboard/assets/images/clash-verge-rev.png" alt="Clash Verge Rev">',
-            title: '导入到 Clash Verge Rev',
-            desc: 'Windows/macOS/Linux，推荐 Clash Verge Rev，兼容 Mihomo Party 等',
-            url: 'clash://install-config?url=' + encodedUrl + '&name=' + title
-          },
-          {
-            id: 'singbox',
-            icon: 'SB',
-            title: '导入到 sing-box / Hiddify Next',
-            desc: '适合 Hiddify Next、SFI、SFA 等 sing-box 系客户端',
-            url: 'sing-box://import-remote-profile?url=' + encodedUrl + '#' + title
-          },
-          {
-            id: 'hiddify',
-            icon: 'HD',
-            title: '导入到 Hiddify',
-            desc: '兼容 Hiddify 自有导入协议',
-            url: 'hiddify://import/' + encodedUrl + '#' + title
-          },
-          {
-            id: 'nekobox',
-            icon: 'NK',
-            title: '导入到 NekoBox Android',
-            desc: 'Android NekoBox 订阅分组导入',
-            url: 'nekobox://install-config?name=' + title + '&type=SUBSCRIPTION&AUTOUPDATE=true&updatetime=1440&url=' + encodedUrl
-          }
-        ]
-      }
-
       function findSubscribePanel() {
         var nodes = Array.prototype.slice.call(document.querySelectorAll('div, section, article'))
         var matches = nodes.filter(function (node) {
@@ -814,39 +714,34 @@
 
       function patchSubscribeImports() {
         var panel = findSubscribePanel()
-        if (!panel || panel.dataset.bcImportEnhanced === '1') return
-        panel.dataset.bcImportEnhanced = '1'
-        getSubscribeData().then(function (data) {
-          if (!data || !data.subscribe_url || !document.documentElement.contains(panel)) {
-            if (panel) delete panel.dataset.bcImportEnhanced
-            return
-          }
-          importRows(data.subscribe_url).forEach(function (item) {
-            if (panel.querySelector('[data-bc-import-id="' + item.id + '"]')) return
-            var row = document.createElement('div')
-            row.className = 'bc-sub-import-row'
-            row.dataset.bcImportId = item.id
-            row.innerHTML = '<span class="bc-sub-import-icon">' + item.icon + '</span><span class="bc-sub-import-main">' + item.title + '<small>' + item.desc + '</small></span>'
-            row.addEventListener('click', function (event) {
-              event.preventDefault()
-              event.stopPropagation()
-              window.location.href = item.url
-            })
-            var footer = Array.prototype.slice.call(panel.querySelectorAll('button, a')).find(function (node) {
-              var text = textOf(node)
-              return text.indexOf('不会使用') !== -1 || text.indexOf('查看使用教程') !== -1
-            })
-            var footerBlock = footer
-            while (footerBlock && footerBlock.parentElement && footerBlock.parentElement !== panel) {
-              footerBlock = footerBlock.parentElement
-            }
-            if (footerBlock && footerBlock.parentElement === panel) {
-              panel.insertBefore(row, footerBlock)
-            } else {
-              panel.appendChild(row)
-            }
-          })
+        if (!panel) return
+        Array.prototype.slice.call(panel.querySelectorAll('.bc-sub-import-row, [data-bc-import-id]')).forEach(function (node) {
+          node.remove()
         })
+        var clashNodes = Array.prototype.slice.call(panel.querySelectorAll('div, span, p, a, button')).filter(function (node) {
+          var text = textOf(node)
+          return text === '导入到Clash' || text === '导入到ClashVergeRev'
+        })
+        clashNodes.forEach(function (node) {
+          var text = textOf(node)
+          if (text === '导入到Clash') {
+            node.textContent = node.textContent.replace('Clash', 'Clash Verge Rev')
+          }
+        })
+        var clashRow = clashNodes[0]
+        for (var i = 0; clashRow && i < 5; i += 1) {
+          var rowText = textOf(clashRow)
+          var rect = clashRow.getBoundingClientRect()
+          if (rowText.indexOf('导入到Clash') !== -1 && rect.width >= 180 && rect.height >= 36) break
+          clashRow = clashRow.parentElement
+        }
+        if (clashRow) {
+          var icon = clashRow.querySelector('img')
+          if (icon && icon.src && icon.src.indexOf('clash-verge-rev') === -1) {
+            icon.src = '/theme/xboard/assets/images/clash-verge-rev.png'
+            icon.alt = 'Clash Verge Rev'
+          }
+        }
       }
 
       function measureLayout() {
