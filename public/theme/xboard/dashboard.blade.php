@@ -64,13 +64,14 @@
     }
     .bc-node-traffic-frame-wrap {
       position: fixed;
-      left: 274px;
+      left: var(--bc-node-traffic-left, 274px);
       right: 0;
-      top: 74px;
+      top: var(--bc-node-traffic-top, 74px);
       bottom: 0;
-      z-index: 100;
+      z-index: 2147483000;
       background: #f5f7fb;
       overflow: hidden;
+      box-shadow: inset 1px 0 0 #eef2f7;
     }
     .bc-node-traffic-frame {
       width: 100%;
@@ -94,6 +95,8 @@
       var menuText = '节点流量明细'
       var inserted = false
       var nodeTrafficOpen = false
+      var activeTitle = null
+      var activeFrame = null
 
       function textOf(node) {
         return (node && node.textContent ? node.textContent : '').replace(/\s+/g, '')
@@ -129,11 +132,12 @@
       }
 
       function findTopTitle() {
+        if (activeTitle && document.documentElement.contains(activeTitle)) return activeTitle
         var nodes = Array.prototype.slice.call(document.querySelectorAll('a, div, span, h1, h2'))
         return nodes.find(function (node) {
           if (textOf(node) !== '流量明细') return false
           var rect = node.getBoundingClientRect()
-          return rect.width > 0 && rect.height > 0 && rect.left > 280 && rect.top < 90
+          return rect.width > 0 && rect.height > 0 && rect.left > 220 && rect.top < 90
         })
       }
 
@@ -141,11 +145,13 @@
         var title = findTopTitle()
         if (!title) return
         if (active) {
+          activeTitle = title
           if (!title.dataset.bcOriginalText) title.dataset.bcOriginalText = title.textContent
           title.textContent = menuText
         } else if (title.dataset.bcOriginalText) {
           title.textContent = title.dataset.bcOriginalText
           delete title.dataset.bcOriginalText
+          activeTitle = null
         }
       }
 
@@ -182,8 +188,13 @@
 
       function getAuthToken() {
         var stores = [window.localStorage, window.sessionStorage]
+        var priorityKeys = ['Vue_Naive_access_token', 'access_token', 'auth_data', 'authorization', 'token', 'user_token']
         for (var s = 0; s < stores.length; s += 1) {
           var store = stores[s]
+          for (var p = 0; p < priorityKeys.length; p += 1) {
+            var direct = findTokenInValue(store.getItem(priorityKeys[p]))
+            if (direct) return direct
+          }
           for (var i = 0; i < store.length; i += 1) {
             var key = store.key(i)
             var token = findTokenInValue(store.getItem(key))
@@ -197,22 +208,62 @@
         return pageUrl + '?embed=1'
       }
 
-      function syncFrameAuth(frame) {
+      function primeFrameAuth() {
         var token = getAuthToken()
         if (!token) return
         try {
           window.sessionStorage.setItem('bc_node_traffic_auth_data', token)
         } catch (error) {}
+        return token
+      }
+
+      function syncFrameAuth(frame, token) {
+        token = token || primeFrameAuth()
+        if (!token || !frame || !frame.contentWindow) return
         frame.contentWindow && frame.contentWindow.postMessage({
           type: 'bc-node-traffic-auth',
           auth_data: token
         }, window.location.origin)
       }
 
+      function measureLayout() {
+        if (window.innerWidth <= 768) {
+          return { left: 0, top: 56 }
+        }
+
+        var sidebarRight = 274
+        var headerBottom = 74
+        var nodes = Array.prototype.slice.call(document.body.querySelectorAll('aside, nav, header, div, section'))
+        nodes.slice(0, 600).forEach(function (node) {
+          var rect = node.getBoundingClientRect()
+          if (!rect.width || !rect.height) return
+          if (rect.left <= 2 && rect.width >= 180 && rect.width <= 360 && rect.height > window.innerHeight * 0.55) {
+            sidebarRight = Math.max(sidebarRight, Math.round(rect.right))
+          }
+        })
+        nodes.slice(0, 600).forEach(function (node) {
+          var rect = node.getBoundingClientRect()
+          if (!rect.width || !rect.height) return
+          if (rect.top <= 2 && rect.left >= sidebarRight - 4 && rect.height >= 48 && rect.height <= 96) {
+            headerBottom = Math.max(headerBottom, Math.round(rect.bottom))
+          }
+        })
+        return { left: sidebarRight, top: headerBottom }
+      }
+
+      function updateFrameLayout() {
+        var wrap = document.querySelector('.bc-node-traffic-frame-wrap')
+        if (!wrap) return
+        var layout = measureLayout()
+        wrap.style.setProperty('--bc-node-traffic-left', layout.left + 'px')
+        wrap.style.setProperty('--bc-node-traffic-top', layout.top + 'px')
+      }
+
       function closeNodeTraffic() {
         nodeTrafficOpen = false
         var old = document.querySelector('.bc-node-traffic-frame-wrap')
         if (old) old.remove()
+        activeFrame = null
         document.body.classList.remove('bc-node-traffic-open')
         var menu = document.querySelector('.bc-node-traffic-menu')
         if (menu) menu.classList.remove('is-active')
@@ -224,8 +275,15 @@
         var menu = document.querySelector('.bc-node-traffic-menu')
         if (menu) menu.classList.add('is-active')
         setTopTitleActive(true)
-        if (document.querySelector('.bc-node-traffic-frame-wrap')) return
+        setTimeout(function () { setTopTitleActive(true) }, 50)
+        var existing = document.querySelector('.bc-node-traffic-frame-wrap')
+        if (existing) {
+          updateFrameLayout()
+          syncFrameAuth(existing.querySelector('iframe'))
+          return
+        }
 
+        var token = primeFrameAuth()
         var wrap = document.createElement('div')
         wrap.className = 'bc-node-traffic-frame-wrap'
         var frame = document.createElement('iframe')
@@ -233,11 +291,13 @@
         frame.src = buildFrameUrl()
         frame.title = menuText
         frame.addEventListener('load', function () {
-          syncFrameAuth(frame)
+          syncFrameAuth(frame, token)
         })
         wrap.appendChild(frame)
         document.body.appendChild(wrap)
-        syncFrameAuth(frame)
+        activeFrame = frame
+        updateFrameLayout()
+        syncFrameAuth(frame, token)
         document.body.classList.add('bc-node-traffic-open')
       }
 
@@ -273,6 +333,12 @@
       })
       observer.observe(document.documentElement, { childList: true, subtree: true })
       window.addEventListener('hashchange', closeNodeTraffic)
+      window.addEventListener('resize', updateFrameLayout)
+      window.addEventListener('message', function (event) {
+        if (event.origin !== window.location.origin) return
+        if (!event.data || event.data.type !== 'bc-node-traffic-need-auth') return
+        syncFrameAuth(activeFrame)
+      })
       window.addEventListener('load', insertMenu)
       setTimeout(insertMenu, 800)
       setTimeout(insertMenu, 2000)

@@ -297,8 +297,10 @@
       selected: new Set(),
       payload: null,
       authToken: '',
+      waitingParentAuth: false,
     };
 
+    const isEmbedded = new URLSearchParams(location.search).get('embed') === '1';
     const colors = ['#0f766e', '#2563eb', '#dc2626', '#7c3aed', '#ea580c', '#0891b2', '#4d7c0f', '#be123c'];
 
     function formatBytes(value) {
@@ -307,6 +309,16 @@
       const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
       const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
       return `${(bytes / Math.pow(1024, index)).toFixed(index ? 2 : 0)} ${units[index]}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
     }
 
     function findTokenInValue(value) {
@@ -341,7 +353,7 @@
       if (state.authToken) return state.authToken;
       const sharedToken = findTokenInValue(sessionStorage.getItem('bc_node_traffic_auth_data'));
       if (sharedToken) return sharedToken;
-      const directKeys = ['auth_data', 'authorization', 'token', 'access_token', 'user_token'];
+      const directKeys = ['Vue_Naive_access_token', 'access_token', 'auth_data', 'authorization', 'token', 'user_token'];
       const stores = [localStorage, sessionStorage];
       for (const store of stores) {
         for (const key of directKeys) {
@@ -369,13 +381,20 @@
         list.innerHTML = '<div class="empty">暂无节点流量记录</div>';
         return;
       }
+      const validKeys = new Set(summary.map((node) => node.key));
+      state.selected.forEach((key) => {
+        if (!validKeys.has(key)) state.selected.delete(key);
+      });
+      if (!state.selected.size) {
+        summary.slice(0, 8).forEach((node) => state.selected.add(node.key));
+      }
       list.innerHTML = summary.map((node) => `
         <label class="node-item">
-          <input type="checkbox" value="${node.key}" ${state.selected.has(node.key) ? 'checked' : ''}>
+          <input type="checkbox" value="${escapeHtml(node.key)}" ${state.selected.has(node.key) ? 'checked' : ''}>
           <span>
             <span class="node-name">
-              <span>${node.name}</span>
-              <span class="node-type">${node.type}</span>
+              <span>${escapeHtml(node.name || `Node ${node.server_id || ''}`)}</span>
+              <span class="node-type">${escapeHtml(node.type || '')}</span>
             </span>
             <span class="node-meta">${formatBytes(node.total)} / 扣费 ${formatBytes(node.cost)}</span>
           </span>
@@ -467,9 +486,9 @@
       }
       tbody.innerHTML = selectedLogs.slice(0, 300).map((log) => `
         <tr>
-          <td>${new Date(Number(log.record_at) * 1000).toLocaleString()}</td>
-          <td>${log.name || `Node ${log.server_id}`}</td>
-          <td>${log.type || log.node_type || ''}</td>
+          <td>${escapeHtml(new Date(Number(log.record_at) * 1000).toLocaleString())}</td>
+          <td>${escapeHtml(log.name || `Node ${log.server_id}`)}</td>
+          <td>${escapeHtml(log.type || log.node_type || '')}</td>
           <td>x ${Number(log.rate || 1).toFixed(2)}</td>
           <td>${formatBytes(log.u)}</td>
           <td>${formatBytes(log.d)}</td>
@@ -489,26 +508,35 @@
     async function loadData() {
       const token = getAuthToken();
       if (!token) {
+        if (isEmbedded) {
+          state.waitingParentAuth = true;
+          setStatus('正在读取用户中心登录态');
+          window.parent.postMessage({ type: 'bc-node-traffic-need-auth' }, window.location.origin);
+          return;
+        }
         setStatus('未检测到登录态，请先在用户中心登录', true);
         return;
       }
+      state.waitingParentAuth = false;
       setStatus('加载中');
       const params = new URLSearchParams({ period: state.period, include_total: '1' });
-      if (state.selected.size) {
-        for (const key of state.selected) params.append('node_keys[]', key);
-      }
       const response = await fetch(`/api/v1/user/stat/getNodeTrafficLog?${params.toString()}`, {
-        headers: { authorization: token },
+        headers: { Authorization: token },
       });
       if (!response.ok) {
+        if (response.status === 403 && isEmbedded) {
+          state.authToken = '';
+          state.waitingParentAuth = true;
+          try {
+            sessionStorage.removeItem('bc_node_traffic_auth_data');
+          } catch (error) {}
+          window.parent.postMessage({ type: 'bc-node-traffic-need-auth' }, window.location.origin);
+        }
         setStatus(response.status === 403 ? '登录态无效，请刷新用户中心后重试' : `加载失败：${response.status}`, true);
         return;
       }
       state.payload = await response.json();
       const summary = state.payload.summary || [];
-      if (!state.selected.size) {
-        summary.slice(0, 8).forEach((node) => state.selected.add(node.key));
-      }
       renderNodes(summary);
       renderAll();
       setStatus(state.payload.meta?.note || '已更新');
@@ -517,7 +545,10 @@
     document.getElementById('periods').addEventListener('click', (event) => {
       const button = event.target.closest('button[data-period]');
       if (!button) return;
+      if (state.period === button.dataset.period) return;
       state.period = button.dataset.period;
+      state.selected.clear();
+      state.payload = null;
       document.querySelectorAll('#periods button').forEach((item) => item.classList.toggle('active', item === button));
       loadData();
     });
@@ -544,7 +575,15 @@
       } catch (error) {}
       loadData();
     });
-    loadData();
+    if (isEmbedded) {
+      setStatus('正在读取用户中心登录态');
+      window.parent.postMessage({ type: 'bc-node-traffic-need-auth' }, window.location.origin);
+      window.setTimeout(() => {
+        if (state.waitingParentAuth || !state.payload) loadData();
+      }, 300);
+    } else {
+      loadData();
+    }
   </script>
 </body>
 </html>
