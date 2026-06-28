@@ -90,8 +90,10 @@ class StatController extends Controller
 
         $logs->transform(function ($item) use ($names, $protocols) {
             $key = $this->buildNodeKey($item->node_type ?? null, $item->server_id);
-            $item->type = (string) ($protocols[$key] ?? $item->node_type);
-            $item->name = (string) ($names[$key] ?? ('Node ' . $item->server_id));
+            $protocol = (string) ($protocols[$key] ?? $item->node_type);
+            $item->type = $protocol;
+            $item->protocol = $protocol;
+            $item->name = (string) ($names[$key] ?? '未命名节点');
             $item->total = (int) $item->u + (int) $item->d;
             $item->cost = (float) $item->cost;
             return $item;
@@ -105,7 +107,8 @@ class StatController extends Controller
                 'server_id' => (int) $row->id,
                 'server_type' => (string) $row->server_type,
                 'type' => (string) ($protocols[$key] ?? $row->server_type),
-                'name' => (string) ($names[$key] ?? ('Node ' . $row->id)),
+                'protocol' => (string) ($protocols[$key] ?? $row->server_type),
+                'name' => (string) ($names[$key] ?? '未命名节点'),
                 'rate' => (float) $row->rate,
                 'u' => (int) $row->u,
                 'd' => (int) $row->d,
@@ -394,8 +397,8 @@ class StatController extends Controller
             foreach ($items as $item) {
                 $id = (int) ($item->id ?? $item->server_id ?? 0);
                 $server = $servers->get($id);
-                $protocol = strtolower((string) ($server->protocol ?? 'v2node'));
-                $protocolMap->put($this->buildNodeKey($type, $id), $protocol ?: 'v2node');
+                $protocol = strtolower((string) ($server->protocol ?? ''));
+                $protocolMap->put($this->buildNodeKey($type, $id), $protocol ?: '未知');
             }
         }
 

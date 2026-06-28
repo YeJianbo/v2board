@@ -36,21 +36,21 @@
   <div id="app"></div>
   <style>
     html.bc-user-polish {
-      --bc-bg: #f5f3ef;
-      --bc-bg-soft: #f8f7f3;
-      --bc-panel: #fbfaf6;
-      --bc-panel-soft: #f8f7f3;
-      --bc-line: rgba(42, 37, 32, .08);
-      --bc-line-strong: rgba(42, 37, 32, .14);
-      --bc-text: #2a2520;
-      --bc-text-soft: #7a7470;
-      --bc-primary: #c94f2e;
-      --bc-primary-strong: #a83d20;
-      --bc-primary-soft: rgba(201, 79, 46, .08);
-      --bc-primary-border: rgba(201, 79, 46, .22);
-      --bc-shadow-xs: 0 1px 2px rgba(42, 37, 32, .04);
-      --bc-shadow-sm: 0 1px 3px rgba(42, 37, 32, .04), 0 4px 12px rgba(42, 37, 32, .03);
-      --bc-shadow-md: 0 4px 16px rgba(42, 37, 32, .06), 0 12px 32px rgba(42, 37, 32, .04);
+      --bc-bg: #f2f2f2;
+      --bc-bg-soft: #f6f7f7;
+      --bc-panel: #ffffff;
+      --bc-panel-soft: #f7f8f8;
+      --bc-line: rgba(31, 34, 37, .09);
+      --bc-line-strong: rgba(31, 34, 37, .14);
+      --bc-text: #1f2328;
+      --bc-text-soft: #6b7280;
+      --bc-primary: var(--primary-color, #18a058);
+      --bc-primary-strong: var(--primary-color, #18a058);
+      --bc-primary-soft: rgba(24, 160, 88, .09);
+      --bc-primary-border: rgba(24, 160, 88, .28);
+      --bc-shadow-xs: 0 1px 2px rgba(31, 34, 37, .04);
+      --bc-shadow-sm: 0 1px 2px rgba(31, 34, 37, .04);
+      --bc-shadow-md: 0 6px 18px rgba(31, 34, 37, .06);
       color-scheme: light;
     }
     .bc-node-traffic-table-toolbar {
@@ -59,21 +59,19 @@
       justify-content: space-between;
       gap: 12px;
       margin-bottom: 12px;
-      padding: 12px 14px;
-      border: 1px solid var(--bc-line);
-      border-radius: 8px;
-      background: var(--bc-panel);
-      box-shadow: var(--bc-shadow-sm);
+      padding: 0;
+      background: transparent;
+      box-shadow: none;
     }
     .bc-node-traffic-table-title {
       margin: 0;
       color: var(--bc-text);
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 700;
       line-height: 1.3;
     }
     .bc-node-traffic-table-desc {
-      margin: 2px 0 0;
+      margin: 4px 0 0;
       color: var(--bc-text-soft);
       font-size: 12px;
       line-height: 1.5;
@@ -81,21 +79,24 @@
     .bc-node-traffic-periods {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 3px;
+      gap: 0;
+      padding: 2px;
+      border: 1px solid var(--bc-line);
       border-radius: 8px;
-      background: var(--bc-panel-soft);
+      background: var(--bc-panel);
     }
     .bc-node-traffic-periods button {
       min-width: 54px;
-      height: 30px;
-      padding: 0 10px;
+      height: 28px;
+      padding: 0 12px;
       border: 0;
       border-radius: 6px;
       background: transparent;
       color: var(--bc-text-soft);
       font-size: 12px;
+      line-height: 28px;
       cursor: pointer;
+      transition: color .15s ease, background-color .15s ease;
     }
     .bc-node-traffic-periods button.is-active {
       background: var(--bc-primary);
@@ -103,17 +104,46 @@
       box-shadow: var(--bc-shadow-xs);
     }
     table.bc-node-traffic-legacy-table {
+      width: 100%;
       table-layout: fixed;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      border: 1px solid var(--bc-line);
+      border-radius: 8px;
+      background: var(--bc-panel);
     }
     table.bc-node-traffic-legacy-table th,
     table.bc-node-traffic-legacy-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--bc-line);
+      color: var(--bc-text);
+      font-size: 13px;
+      line-height: 1.45;
+      text-align: left;
       vertical-align: middle;
       white-space: nowrap;
     }
+    table.bc-node-traffic-legacy-table th {
+      background: var(--bc-panel-soft);
+      color: var(--bc-text-soft);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    table.bc-node-traffic-legacy-table tbody tr:last-child td {
+      border-bottom: 0;
+    }
+    table.bc-node-traffic-legacy-table tbody tr:hover td {
+      background: var(--bc-primary-soft);
+    }
     table.bc-node-traffic-legacy-table th:nth-child(2),
     table.bc-node-traffic-legacy-table td:nth-child(2) {
-      width: 26%;
+      width: 24%;
       white-space: normal;
+    }
+    table.bc-node-traffic-legacy-table th:nth-child(3),
+    table.bc-node-traffic-legacy-table td:nth-child(3) {
+      width: 96px;
     }
     .bc-node-traffic-node {
       display: flex;
@@ -125,7 +155,7 @@
       overflow: hidden;
       color: var(--bc-text);
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 500;
       line-height: 1.35;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -140,11 +170,12 @@
       align-items: center;
       min-height: 22px;
       padding: 0 8px;
-      border-radius: 999px;
+      border: 1px solid var(--bc-primary-border);
+      border-radius: 6px;
       background: var(--bc-primary-soft);
       color: var(--bc-primary-strong);
       font-size: 11px;
-      font-weight: 700;
+      font-weight: 600;
       text-transform: uppercase;
     }
     .bc-node-traffic-empty {
@@ -511,9 +542,8 @@
         }, 80)
       }
 
-      function buildNodeTrafficUrl(token) {
+      function buildNodeTrafficUrl() {
         var url = '/api/v1/user/stat/getNodeTrafficLog?period=' + encodeURIComponent(nodeTrafficPeriod) + '&include_total=1'
-        if (token) url += '&auth_data=' + encodeURIComponent(token)
         return url
       }
 
@@ -549,6 +579,15 @@
         var rate = Number(value)
         if (!isFinite(rate)) return '-'
         return rate.toFixed(rate % 1 === 0 ? 0 : 2) + 'x'
+      }
+
+      function formatProtocol(row) {
+        var serverType = String(row.server_type || row.node_type || '').toLowerCase()
+        var protocol = String(row.protocol || row.type || '').toLowerCase()
+        if (!protocol || protocol === 'v2node') {
+          protocol = serverType === 'v2node' ? '' : serverType
+        }
+        return protocol || '未知'
       }
 
       function formatTrafficTime(value, period) {
@@ -609,12 +648,11 @@
         }
         tbody.innerHTML = rows.map(function (row) {
           var serverType = row.server_type || row.node_type || ''
-          var nodeId = row.server_id || row.id || ''
-          var nodeName = row.name || ('Node ' + nodeId)
-          var protocol = row.type || serverType || '-'
+          var nodeName = row.name || '未命名节点'
+          var protocol = formatProtocol(row)
           return '<tr>' +
             '<td>' + escapeHtml(formatTrafficTime(row.record_at, nodeTrafficPeriod)) + '</td>' +
-            '<td><div class="bc-node-traffic-node"><strong title="' + escapeHtml(nodeName) + '">' + escapeHtml(nodeName) + '</strong><span>' + escapeHtml(serverType + (nodeId ? ':' + nodeId : '')) + '</span></div></td>' +
+            '<td><div class="bc-node-traffic-node"><strong title="' + escapeHtml(nodeName) + '">' + escapeHtml(nodeName) + '</strong></div></td>' +
             '<td><span class="bc-node-traffic-protocol">' + escapeHtml(protocol) + '</span></td>' +
             '<td>' + escapeHtml(formatRate(row.rate)) + '</td>' +
             '<td>' + escapeHtml(formatBytes(row.u)) + '</td>' +
