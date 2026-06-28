@@ -109,6 +109,10 @@
       width: 100%;
       table-layout: auto;
     }
+    html.bc-node-traffic-route table:not(.bc-node-traffic-legacy-table) tbody,
+    html.bc-node-traffic-route table:not(.bc-node-traffic-legacy-table) .n-data-table-tbody {
+      opacity: 0;
+    }
     table.bc-node-traffic-legacy-table th:nth-child(1) .n-data-table-th__title,
     table.bc-node-traffic-legacy-table td:nth-child(1) .n-data-table-td__content {
       white-space: nowrap;
@@ -289,7 +293,7 @@
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
       var nodeTrafficPageSize = 10
-      var nodeTrafficPatchVersion = '20260628-spinner-loading'
+      var nodeTrafficPatchVersion = '20260628-spinner-stable'
       var subscribeInfoCache = null
       var subscribeInfoLoading = null
       var titleCandidates = [
@@ -430,6 +434,7 @@
           removeNodeTrafficInlineControls()
           return
         }
+        updateTrafficRouteClass()
 
         var patched = patchLegacyTrafficTable(!!shouldScroll)
         if (patched) {
@@ -483,6 +488,10 @@
         var hash = String(window.location.hash || '')
         var path = String(window.location.pathname || '')
         return hash.indexOf('/traffic') !== -1 || path === '/traffic'
+      }
+
+      function updateTrafficRouteClass() {
+        document.documentElement.classList.toggle('bc-node-traffic-route', isTrafficRoute())
       }
 
       function removeNodeTrafficInlineControls() {
@@ -596,15 +605,17 @@
 
       function schedulePatch() {
         if (insertMenuTimer) return
+        updateTrafficRouteClass()
         insertMenuTimer = window.setTimeout(function () {
           insertMenuTimer = 0
           if (!isTrafficRoute()) {
             removeNodeTrafficInlineControls()
+            updateTrafficRouteClass()
             return
           }
           removeLegacyNodeTrafficMenu()
           ensureNodeTrafficInline(0, false)
-        }, 80)
+        }, isTrafficRoute() ? 16 : 80)
       }
 
       function buildNodeTrafficUrl() {
@@ -859,7 +870,7 @@
 
       function setNodeTrafficMessage(table, message) {
         var tbody = setupNodeTrafficTable(table)
-        tbody.innerHTML = '<tr>' + renderNodeTrafficBodyCell(message || '加载中...', { colspan: 8, extraClass: 'bc-node-traffic-empty' }) + '</tr>'
+        tbody.innerHTML = '<tr>' + renderNodeTrafficBodyCell(message || '暂无节点维度流量数据', { colspan: 8, extraClass: 'bc-node-traffic-empty' }) + '</tr>'
         removeNodeTrafficPagination(table)
       }
 
@@ -1113,7 +1124,6 @@
             setNodeTrafficLoading(table)
             setTimeout(function () {
               if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
-              table.dataset.bcNodeTrafficLoading = ''
               patchNodeTrafficTable(table, false, true)
             }, 250)
             return true
@@ -1181,6 +1191,7 @@
         removeNodeTrafficInlineControls()
         setTopTitleActive(false)
         syncMenuState(false)
+        updateTrafficRouteClass()
         schedulePatch()
       }
 
@@ -1191,6 +1202,7 @@
       }
 
       function handleMutation() {
+        updateTrafficRouteClass()
         schedulePatch()
         scheduleSubscribePatch()
       }
@@ -1200,6 +1212,7 @@
       window.addEventListener('hashchange', handleRouteChange)
       window.addEventListener('resize', handleMutation)
       window.addEventListener('load', handleMutation)
+      updateTrafficRouteClass()
       setTimeout(handleMutation, 800)
       setTimeout(handleMutation, 2000)
       setInterval(function () {
