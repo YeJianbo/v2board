@@ -108,7 +108,7 @@ class StatUserServerJob implements ShouldQueue
                         continue;
                     }
                 }
-                abort(500, '用户节点统计数据失败' . $e->getMessage());
+                throw new \RuntimeException('用户节点统计数据失败' . $e->getMessage(), 0, $e);
             }
         }
     }

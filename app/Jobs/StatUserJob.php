@@ -94,7 +94,7 @@ class StatUserJob implements ShouldQueue
                         continue;
                     }
                 }
-                abort(500, '用户统计数据失败'. $e->getMessage());
+                throw new \RuntimeException('用户统计数据失败' . $e->getMessage(), 0, $e);
             }
         }
     }
