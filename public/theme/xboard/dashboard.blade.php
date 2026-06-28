@@ -58,32 +58,10 @@
       box-shadow: none !important;
     }
     .bc-node-traffic-menu {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-height: 42px;
-      margin: 4px 8px 4px 12px;
-      padding: 0 18px 0 28px;
-      border-radius: 4px;
-      color: inherit;
-      font-size: 14px;
-      text-decoration: none;
       cursor: pointer;
     }
-    .bc-node-traffic-menu:hover,
     .bc-node-traffic-menu.is-active {
-      background: var(--bc-primary-soft);
       color: var(--bc-primary-strong);
-      box-shadow: inset 3px 0 0 0 var(--bc-primary);
-    }
-    .bc-node-traffic-menu::before {
-      content: "";
-      width: 18px;
-      height: 18px;
-      background:
-        linear-gradient(currentColor, currentColor) 2px 10px / 4px 8px no-repeat,
-        linear-gradient(currentColor, currentColor) 8px 5px / 4px 13px no-repeat,
-        linear-gradient(currentColor, currentColor) 14px 0 / 4px 18px no-repeat;
     }
     .bc-node-traffic-frame-wrap {
       display: block;
@@ -210,6 +188,15 @@
           current = current.parentElement
         }
         return node
+      }
+
+      function replaceMenuText(node, text) {
+        var candidates = Array.prototype.slice.call(node.querySelectorAll('span, div, a'))
+        var target = candidates.find(function (item) {
+          return textOf(item) === '流量明细'
+        })
+        if (!target) target = node
+        target.textContent = text
       }
 
       function openNodeTraffic() {
@@ -621,10 +608,15 @@
         if (!traffic) return
 
         var root = clickableRoot(traffic)
-        var item = document.createElement('a')
-        item.className = 'bc-node-traffic-menu'
-        item.href = 'javascript:void(0)'
-        item.innerHTML = '<span>' + menuText + '</span>'
+        var item = root.cloneNode(true)
+        item.classList.add('bc-node-traffic-menu')
+        item.removeAttribute('aria-current')
+        item.removeAttribute('data-v-traffic-menu')
+        if (item.tagName === 'A') item.href = 'javascript:void(0)'
+        Array.prototype.slice.call(item.querySelectorAll('a')).forEach(function (link) {
+          link.href = 'javascript:void(0)'
+        })
+        replaceMenuText(item, menuText)
         item.addEventListener('click', function (event) {
           event.preventDefault()
           event.stopPropagation()
