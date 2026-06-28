@@ -15,10 +15,10 @@ class KnowledgeController extends Controller
     public function fetch(Request $request)
     {
         if ($request->input('id')) {
-            $knowledge = Knowledge::find($request->input('id'))->toArray();
+            $knowledge = Knowledge::find($request->input('id'));
             if (!$knowledge)
                 return $this->fail([400202, '知识不存在']);
-            return $this->success($knowledge);
+            return $this->success($knowledge->toArray());
         }
         $data = Knowledge::select(['title', 'id', 'updated_at', 'category', 'show'])
             ->orderBy('sort', 'ASC')

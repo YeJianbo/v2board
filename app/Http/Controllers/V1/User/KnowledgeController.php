@@ -16,9 +16,9 @@ class KnowledgeController extends Controller
         if ($request->input('id')) {
             $knowledge = Knowledge::where('id', $request->input('id'))
                 ->where('show', 1)
-                ->first()
-                ->toArray();
+                ->first();
             if (!$knowledge) abort(500, __('Article does not exist'));
+            $knowledge = $knowledge->toArray();
             $user = User::find($request->user['id']);
             $userService = new UserService();
             if (!$userService->isAvailable($user)) {
@@ -69,10 +69,15 @@ class KnowledgeController extends Controller
 
     private function formatAccessData(&$body)
     {
-        while (strpos($body, '<!--access start-->') !== false) {
+        while (
+            strpos($body, '<!--access start-->') !== false &&
+            strpos($body, '<!--access end-->') !== false
+        ) {
             $accessData = $this->getBetween($body, '<!--access start-->', '<!--access end-->');
             if ($accessData) {
                 $body = str_replace($accessData, '<div class="v2board-no-access">'. __('You must have a valid subscription to view content in this area') .'</div>', $body);
+            } else {
+                break;
             }
         }
     }
