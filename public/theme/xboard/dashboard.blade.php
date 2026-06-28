@@ -108,6 +108,36 @@
       color: var(--bc-text-soft);
       text-align: center;
     }
+    .bc-node-traffic-fallback {
+      margin: 24px 28px;
+      overflow: hidden;
+      border: 1px solid #edf0f2;
+      border-radius: 4px;
+      background: #fff;
+    }
+    .bc-node-traffic-fallback table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+    }
+    .bc-node-traffic-fallback th,
+    .bc-node-traffic-fallback td {
+      padding: 14px 16px;
+      border-bottom: 1px solid #edf0f2;
+      color: #1f2328;
+      font-size: 14px;
+      line-height: 1.45;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .bc-node-traffic-fallback th {
+      background: #fafafa;
+      color: #344054;
+      font-weight: 500;
+    }
+    .bc-node-traffic-fallback tr:last-child td {
+      border-bottom: 0;
+    }
     @media (max-width: 768px) {
       .bc-node-traffic-periods {
         width: 100%;
@@ -262,15 +292,24 @@
 
       function ensureNodeTrafficInline(attempt, shouldScroll) {
         if (isTrafficDetailPage()) {
-          patchLegacyTrafficTable(!!shouldScroll)
+          if (patchLegacyTrafficTable(!!shouldScroll)) {
+            return
+          }
+          if (attempt < 30) {
+            setTimeout(function () {
+              ensureNodeTrafficInline(attempt + 1, shouldScroll)
+            }, 150)
+            return
+          }
+          ensureFallbackTrafficTable(!!shouldScroll)
           return
         }
-        if (attempt >= 2) {
+        if (attempt >= 30) {
           return
         }
         setTimeout(function () {
           ensureNodeTrafficInline(attempt + 1, shouldScroll)
-        }, 120)
+        }, 150)
       }
 
       function findTopTitle() {
@@ -332,6 +371,40 @@
         var title = findTopTitle()
         if (title && textOf(title).indexOf('流量明细') !== -1) return true
         return !!findLegacyTrafficTable()
+      }
+
+      function findContentRoot() {
+        var layout = measureLayout()
+        var nodes = Array.prototype.slice.call(document.body.querySelectorAll('main, section, div'))
+        return nodes.filter(function (node) {
+          if (node.closest && node.closest('aside, nav')) return false
+          var rect = node.getBoundingClientRect()
+          return rect.width > Math.max(520, window.innerWidth - layout.left - 80) &&
+            rect.height > Math.max(260, window.innerHeight - layout.top - 80) &&
+            rect.left >= layout.left - 12 &&
+            rect.top >= layout.top - 12
+        }).sort(function (a, b) {
+          var ar = a.getBoundingClientRect()
+          var br = b.getBoundingClientRect()
+          return (ar.width * ar.height) - (br.width * br.height)
+        })[0] || null
+      }
+
+      function ensureFallbackTrafficTable(shouldScroll) {
+        var existing = document.querySelector('.bc-node-traffic-fallback table')
+        if (existing) {
+          patchNodeTrafficTable(existing, shouldScroll, false)
+          return true
+        }
+
+        var root = findContentRoot()
+        if (!root) return false
+        var wrap = document.createElement('div')
+        wrap.className = 'bc-node-traffic-fallback'
+        wrap.innerHTML = '<table><thead></thead><tbody></tbody></table>'
+        root.appendChild(wrap)
+        patchNodeTrafficTable(wrap.querySelector('table'), shouldScroll, true)
+        return true
       }
 
       function removeTrafficNotice() {
@@ -603,6 +676,11 @@
       function patchLegacyTrafficTable(shouldScroll, forceReload) {
         var table = findLegacyTrafficTable()
         if (!table) return false
+        return patchNodeTrafficTable(table, shouldScroll, forceReload)
+      }
+
+      function patchNodeTrafficTable(table, shouldScroll, forceReload) {
+        if (!table) return false
         syncMenuState(true)
         setTopTitleActive(true)
         removeTrafficNotice()
@@ -637,7 +715,7 @@
             setTimeout(function () {
               if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
               table.dataset.bcNodeTrafficLoading = ''
-              patchLegacyTrafficTable(false, true)
+              patchNodeTrafficTable(table, false, true)
             }, 250)
             return true
           }
