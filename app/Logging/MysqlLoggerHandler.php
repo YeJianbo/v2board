@@ -8,6 +8,7 @@ use App\Models\Log as LogModel;
 class MysqlLoggerHandler extends AbstractProcessingHandler
 {
     private const MASK = '[FILTERED]';
+    private const TEXT_LIMIT = 16000;
 
     private const SENSITIVE_KEYS = [
         'auth_data',
@@ -66,14 +67,14 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
                 $timestamp = time();
             }
             $log = [
-                'title' => $record['message'],
-                'level' => $record['level_name'],
-                'host' => $record['request_host'] ?? ($request ? $request->getSchemeAndHttpHost() : ''),
-                'uri' => $this->sanitizeUri($record['request_uri'] ?? ($request ? $request->getRequestUri() : 'console')),
-                'method' => $record['request_method'] ?? ($request ? $request->getMethod() : 'CLI'),
-                'ip' => $request ? $request->getClientIp() : '',
-                'data' => json_encode($record['request_data']) ,
-                'context' => isset($record['context']) ? json_encode($record['context']) : '',
+                'title' => $this->limitString((string)($record['message'] ?? ''), self::TEXT_LIMIT),
+                'level' => $this->limitString((string)($record['level_name'] ?? ''), 11),
+                'host' => $this->limitString((string)($record['request_host'] ?? ($request ? $request->getSchemeAndHttpHost() : '')), 255),
+                'uri' => $this->limitString($this->sanitizeUri($record['request_uri'] ?? ($request ? $request->getRequestUri() : 'console')), 255),
+                'method' => $this->limitString((string)($record['request_method'] ?? ($request ? $request->getMethod() : 'CLI')), 11),
+                'ip' => $this->limitString((string)($request ? $request->getClientIp() : ''), 128),
+                'data' => $this->safeJson($record['request_data']),
+                'context' => isset($record['context']) ? $this->safeJson($record['context']) : '',
                 'created_at' => $timestamp,
                 'updated_at' => $timestamp,
             ];
@@ -116,12 +117,41 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
         return $value;
     }
 
+    private function safeJson($value): string
+    {
+        $json = json_encode(
+            $value,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR
+        );
+
+        if (!is_string($json)) {
+            $json = '';
+        }
+
+        return $this->limitString($json, self::TEXT_LIMIT);
+    }
+
     private function sanitizeString(string $value): string
     {
-        $value = preg_replace('/Bearer\s+eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/i', 'Bearer ' . self::MASK, $value);
-        $value = preg_replace('/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/', self::MASK, $value);
+        $value = preg_replace('/Bearer\s+eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/i', 'Bearer ' . self::MASK, $value) ?? $value;
+        $value = preg_replace('/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/', self::MASK, $value) ?? $value;
 
         return $value;
+    }
+
+    private function limitString(string $value, int $limit): string
+    {
+        if ($limit <= 0) {
+            return '';
+        }
+
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            return mb_strlen($value, 'UTF-8') > $limit
+                ? mb_substr($value, 0, $limit, 'UTF-8')
+                : $value;
+        }
+
+        return strlen($value) > $limit ? substr($value, 0, $limit) : $value;
     }
 
     private function sanitizeUri(string $uri): string
