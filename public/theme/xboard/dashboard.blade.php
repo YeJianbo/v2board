@@ -314,6 +314,13 @@
             url: 'sing-box://import-remote-profile?url=' + encodedUrl + '#' + title
           },
           {
+            id: 'hiddify',
+            icon: 'HD',
+            title: '导入到 Hiddify',
+            desc: '兼容 Hiddify 自有导入协议',
+            url: 'hiddify://import/' + encodedUrl + '#' + title
+          },
+          {
             id: 'nekobox',
             icon: 'NK',
             title: '导入到 NekoBox Android',
