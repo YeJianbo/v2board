@@ -108,10 +108,54 @@
       color: var(--bc-text-soft);
       text-align: center;
     }
+    .bc-node-traffic-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      margin: 12px 0 0;
+      color: var(--bc-text-soft);
+      font-size: 13px;
+    }
+    .bc-node-traffic-pagination button {
+      min-width: 32px;
+      height: 32px;
+      padding: 0 10px;
+      border: 1px solid var(--bc-line-strong);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--bc-text);
+      font-size: 13px;
+      line-height: 30px;
+      cursor: pointer;
+      transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+    }
+    .bc-node-traffic-pagination button.is-active {
+      border-color: var(--bc-primary);
+      background: var(--bc-primary);
+      color: #fff;
+    }
+    .bc-node-traffic-pagination button:disabled {
+      cursor: not-allowed;
+      opacity: .45;
+    }
+    .bc-node-traffic-page-info {
+      margin-right: 8px;
+      white-space: nowrap;
+    }
+    .bc-node-traffic-page-gap {
+      min-width: 18px;
+      text-align: center;
+      color: var(--bc-text-soft);
+    }
     @media (max-width: 768px) {
       .bc-node-traffic-periods {
         width: 100%;
         justify-content: flex-end;
+      }
+      .bc-node-traffic-pagination {
+        justify-content: flex-start;
+        overflow-x: auto;
       }
     }
   </style>
@@ -127,6 +171,9 @@
       var nodeTrafficAuthRetry = 0
       var nodeTrafficLastFailedAt = 0
       var nodeTrafficRenderCache = {}
+      var nodeTrafficPayloadCache = {}
+      var nodeTrafficPageMap = {}
+      var nodeTrafficPageSize = 10
       var titleCandidates = [
         '仪表盘',
         '使用文档',
@@ -262,7 +309,7 @@
 
       function ensureNodeTrafficInline(attempt, shouldScroll) {
         if (!isTrafficRoute()) {
-          removeFallbackTrafficTable()
+          removeNodeTrafficInlineControls()
           return
         }
 
@@ -314,46 +361,15 @@
         }) || null
       }
 
-      function findLegacyTrafficRoot() {
-        var table = findLegacyTrafficTable()
-        if (!table) return null
-        var layout = measureLayout()
-        var current = table.parentElement
-        var best = null
-        for (var i = 0; current && current !== document.body && i < 10; i += 1) {
-          var rect = current.getBoundingClientRect()
-          if (rect.width >= 420 &&
-            rect.height >= 220 &&
-            rect.left >= layout.left - 24 &&
-            rect.top >= layout.top - 36 &&
-            !(current.closest && current.closest('aside, nav'))) {
-            best = current
-          }
-          current = current.parentElement
-        }
-        return best
-      }
-
-      function isTrafficDetailPage() {
-        if (!isTrafficRoute()) return false
-        var title = findTopTitle()
-        if (title && textOf(title).indexOf('流量明细') !== -1) return true
-        return false
-      }
-
       function isTrafficRoute() {
         var hash = String(window.location.hash || '')
         var path = String(window.location.pathname || '')
         return hash.indexOf('/traffic') !== -1 || path === '/traffic'
       }
 
-      function removeFallbackTrafficTable() {
-        Array.prototype.slice.call(document.querySelectorAll('.bc-node-traffic-fallback, .bc-node-traffic-table-toolbar')).forEach(function (node) {
+      function removeNodeTrafficInlineControls() {
+        Array.prototype.slice.call(document.querySelectorAll('.bc-node-traffic-table-toolbar, .bc-node-traffic-pagination')).forEach(function (node) {
           node.remove()
-        })
-        Array.prototype.slice.call(document.querySelectorAll('[data-bc-hidden-legacy-traffic]')).forEach(function (node) {
-          node.style.display = ''
-          delete node.dataset.bcHiddenLegacyTraffic
         })
       }
 
@@ -465,7 +481,7 @@
         insertMenuTimer = window.setTimeout(function () {
           insertMenuTimer = 0
           if (!isTrafficRoute()) {
-            removeFallbackTrafficTable()
+            removeNodeTrafficInlineControls()
             return
           }
           removeLegacyNodeTrafficMenu()
@@ -548,6 +564,7 @@
             var button = event.target && event.target.closest ? event.target.closest('button[data-period]') : null
             if (!button) return
             nodeTrafficPeriod = button.dataset.period || 'day'
+            nodeTrafficPageMap[nodeTrafficPeriod] = 1
             table.dataset.bcNodeTrafficLoaded = ''
             table.dataset.bcNodeTrafficFailed = ''
             nodeTrafficAuthRetry = 0
@@ -581,6 +598,7 @@
       function setNodeTrafficMessage(table, message) {
         var tbody = setupNodeTrafficTable(table)
         tbody.innerHTML = '<tr>' + renderNodeTrafficBodyCell(message || '加载中...', { colspan: 8, extraClass: 'bc-node-traffic-empty' }) + '</tr>'
+        removeNodeTrafficPagination(table)
       }
 
       function ensureNodeTrafficColgroup(table) {
@@ -623,13 +641,87 @@
           '</td>'
       }
 
-      function cacheNodeTrafficTable(table) {
+      function getNodeTrafficPage() {
+        var page = Number(nodeTrafficPageMap[nodeTrafficPeriod] || 1)
+        return isFinite(page) && page > 0 ? Math.floor(page) : 1
+      }
+
+      function setNodeTrafficPage(page, totalPages) {
+        var maxPage = Math.max(1, Number(totalPages || 1))
+        var nextPage = Math.max(1, Math.min(maxPage, Math.floor(Number(page || 1))))
+        nodeTrafficPageMap[nodeTrafficPeriod] = nextPage
+        return nextPage
+      }
+
+      function removeNodeTrafficPagination(table) {
+        var parent = table && table.parentElement
+        if (!parent) return
+        Array.prototype.slice.call(parent.children).forEach(function (node) {
+          if (node.classList && node.classList.contains('bc-node-traffic-pagination')) node.remove()
+        })
+      }
+
+      function getPageNumbers(currentPage, totalPages) {
+        var pages = []
+        var add = function (page) {
+          if (page >= 1 && page <= totalPages && pages.indexOf(page) === -1) pages.push(page)
+        }
+        add(1)
+        for (var page = currentPage - 2; page <= currentPage + 2; page += 1) add(page)
+        add(totalPages)
+        pages.sort(function (a, b) { return a - b })
+        return pages
+      }
+
+      function renderNodeTrafficPagination(table, totalRows, totalPages, currentPage) {
+        var parent = table.parentElement
+        if (!parent) return
+        if (totalRows <= nodeTrafficPageSize) {
+          removeNodeTrafficPagination(table)
+          return
+        }
+
+        var pagination = Array.prototype.slice.call(parent.children).find(function (node) {
+          return node.classList && node.classList.contains('bc-node-traffic-pagination')
+        })
+        if (!pagination) {
+          pagination = document.createElement('div')
+          pagination.className = 'bc-node-traffic-pagination'
+          if (table.nextSibling) parent.insertBefore(pagination, table.nextSibling)
+          else parent.appendChild(pagination)
+          pagination.addEventListener('click', function (event) {
+            var button = event.target && event.target.closest ? event.target.closest('button[data-page], button[data-page-action]') : null
+            if (!button || button.disabled) return
+            var targetPage = getNodeTrafficPage()
+            if (button.dataset.pageAction === 'prev') targetPage -= 1
+            else if (button.dataset.pageAction === 'next') targetPage += 1
+            else targetPage = Number(button.dataset.page || targetPage)
+            setNodeTrafficPage(targetPage, Number(pagination.dataset.totalPages || 1))
+            var payload = nodeTrafficPayloadCache[nodeTrafficPeriod]
+            if (payload) renderNodeTrafficRows(table, payload, { fromCache: true })
+          })
+        }
+
+        pagination.dataset.totalPages = String(totalPages)
+        var html = '<span class="bc-node-traffic-page-info">共 ' + totalRows + ' 条，每页 ' + nodeTrafficPageSize + ' 条</span>'
+        html += '<button type="button" data-page-action="prev"' + (currentPage <= 1 ? ' disabled' : '') + '>上一页</button>'
+        var pages = getPageNumbers(currentPage, totalPages)
+        for (var i = 0; i < pages.length; i += 1) {
+          if (i > 0 && pages[i] - pages[i - 1] > 1) html += '<span class="bc-node-traffic-page-gap">...</span>'
+          html += '<button type="button" data-page="' + pages[i] + '"' + (pages[i] === currentPage ? ' class="is-active"' : '') + '>' + pages[i] + '</button>'
+        }
+        html += '<button type="button" data-page-action="next"' + (currentPage >= totalPages ? ' disabled' : '') + '>下一页</button>'
+        pagination.innerHTML = html
+      }
+
+      function cacheNodeTrafficTable(table, pageMeta) {
         var thead = table.tHead
         var tbody = table.tBodies[0]
         if (!thead || !tbody) return
         nodeTrafficRenderCache[nodeTrafficPeriod] = {
           thead: thead.innerHTML,
-          tbody: tbody.innerHTML
+          tbody: tbody.innerHTML,
+          pageMeta: pageMeta || null
         }
       }
 
@@ -647,20 +739,31 @@
         table.dataset.bcNodeTrafficFailed = ''
         table.dataset.bcNodeTrafficHasRows = '1'
         ensureTrafficToolbar(table)
+        if (cache.pageMeta) {
+          renderNodeTrafficPagination(table, cache.pageMeta.totalRows, cache.pageMeta.totalPages, cache.pageMeta.currentPage)
+        } else {
+          removeNodeTrafficPagination(table)
+        }
         return true
       }
 
-      function renderNodeTrafficRows(table, payload) {
+      function renderNodeTrafficRows(table, payload, options) {
+        var opts = options || {}
+        if (!opts.fromCache) nodeTrafficPayloadCache[nodeTrafficPeriod] = payload || {}
         var rows = payload && Array.isArray(payload.data) ? payload.data : []
         var meta = payload && payload.meta ? payload.meta : {}
         var tbody = setupNodeTrafficTable(table)
         if (!rows.length) {
           tbody.innerHTML = '<tr>' + renderNodeTrafficBodyCell(meta.note || '暂无节点维度流量数据', { colspan: 8, extraClass: 'bc-node-traffic-empty' }) + '</tr>'
-          cacheNodeTrafficTable(table)
+          removeNodeTrafficPagination(table)
+          cacheNodeTrafficTable(table, null)
           return
         }
-        tbody.innerHTML = rows.map(function (row) {
-          var serverType = row.server_type || row.node_type || ''
+        var totalPages = Math.max(1, Math.ceil(rows.length / nodeTrafficPageSize))
+        var currentPage = setNodeTrafficPage(getNodeTrafficPage(), totalPages)
+        var start = (currentPage - 1) * nodeTrafficPageSize
+        var pageRows = rows.slice(start, start + nodeTrafficPageSize)
+        tbody.innerHTML = pageRows.map(function (row) {
           var nodeName = row.name || '未命名节点'
           var protocol = formatProtocol(row)
           return '<tr>' +
@@ -674,7 +777,12 @@
             renderNodeTrafficBodyCell(formatBytes(row.cost)) +
             '</tr>'
         }).join('')
-        cacheNodeTrafficTable(table)
+        renderNodeTrafficPagination(table, rows.length, totalPages, currentPage)
+        cacheNodeTrafficTable(table, {
+          totalRows: rows.length,
+          totalPages: totalPages,
+          currentPage: currentPage
+        })
       }
 
       function patchLegacyTrafficTable(shouldScroll, forceReload) {
@@ -783,7 +891,7 @@
       }
 
       function handleRouteChange() {
-        removeFallbackTrafficTable()
+        removeNodeTrafficInlineControls()
         setTopTitleActive(false)
         syncMenuState(false)
         schedulePatch()
@@ -803,7 +911,7 @@
       setTimeout(schedulePatch, 800)
       setTimeout(schedulePatch, 2000)
       setInterval(function () {
-        if (!isTrafficRoute()) removeFallbackTrafficTable()
+        if (!isTrafficRoute()) removeNodeTrafficInlineControls()
       }, 300)
     })()
   </script>
