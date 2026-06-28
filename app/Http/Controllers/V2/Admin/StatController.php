@@ -327,7 +327,7 @@ class StatController extends Controller
         }
 
         $rows = (clone $statsQuery)
-            ->selectRaw('server_id as id, server_type, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
+            ->selectRaw('server_id as id, server_type, MAX(server_rate) as rate, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
             ->groupBy('server_id', 'server_type')
             ->orderBy('total', 'DESC')
             ->get();
@@ -341,6 +341,7 @@ class StatController extends Controller
                 'id' => (int) $row->id,
                 'type' => (string) ($protocols[$key] ?? $row->server_type),
                 'name' => $names[$key] ?? "Node {$row->id}",
+                'rate' => (string) ($row->rate ?? '1.00'),
                 'u' => (int) $row->u,
                 'd' => (int) $row->d,
                 'total' => (int) $row->total,
