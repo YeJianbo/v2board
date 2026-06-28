@@ -14,7 +14,7 @@ use Illuminate\Http\Request;
 |
 */
 
-Route::get('/', function (Request $request) {
+$frontendViewData = function (Request $request) {
     if (config('v2board.app_url') && config('v2board.safe_mode_enable', 0)) {
         if ($request->server('HTTP_HOST') !== parse_url(config('v2board.app_url'))['host']) {
             abort(403);
@@ -35,7 +35,9 @@ Route::get('/', function (Request $request) {
 
     $renderParams['theme_config'] = config('theme.' . config('v2board.frontend_theme', 'default'));
     return view('theme::' . config('v2board.frontend_theme', 'default') . '.dashboard', $renderParams);
-});
+};
+
+Route::get('/', $frontendViewData);
 
 // 后台管理端为前端 SPA，除了 secure_path 根路径外，还需要兜底其子路由。
 $adminViewData = function () {
@@ -62,3 +64,5 @@ Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_pa
 if (!empty(config('v2board.subscribe_path'))) {
     Route::get(config('v2board.subscribe_path'), 'V1\\Client\\ClientController@subscribe')->middleware('client');
 }
+
+Route::get('/{any}', $frontendViewData)->where('any', '^(?!api/|theme/|assets/|storage/|vendor/|livewire/|_debugbar/).*$');
