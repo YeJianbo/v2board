@@ -57,51 +57,104 @@
       background: transparent !important;
       box-shadow: none !important;
     }
-    html.bc-user-polish .bc-node-traffic-content-host > :not(.bc-node-traffic-frame-wrap) {
-      display: none !important;
-    }
-    .bc-node-traffic-frame-wrap {
-      display: block;
-      width: 100%;
-      margin-top: 0;
-      min-height: 540px;
-      padding: 0;
-      background: transparent;
-      overflow: hidden;
-    }
-    .bc-node-traffic-inline-head {
+    .bc-node-traffic-table-toolbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
       margin-bottom: 12px;
-      padding: 16px 18px;
+      padding: 12px 14px;
       border: 1px solid var(--bc-line);
       border-radius: 8px;
       background: var(--bc-panel);
       box-shadow: var(--bc-shadow-sm);
     }
-    .bc-node-traffic-inline-title {
+    .bc-node-traffic-table-title {
       margin: 0;
       color: var(--bc-text);
-      font-size: 18px;
+      font-size: 15px;
       font-weight: 700;
       line-height: 1.3;
     }
-    .bc-node-traffic-inline-desc {
-      margin: 4px 0 0;
+    .bc-node-traffic-table-desc {
+      margin: 2px 0 0;
       color: var(--bc-text-soft);
       font-size: 12px;
       line-height: 1.5;
     }
-    .bc-node-traffic-frame {
-      width: 100%;
-      min-height: 520px;
-      border: 0;
-      background: transparent;
+    .bc-node-traffic-periods {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px;
+      border-radius: 8px;
+      background: var(--bc-panel-soft);
     }
-    body.bc-node-traffic-open {
-      overflow: auto;
+    .bc-node-traffic-periods button {
+      min-width: 54px;
+      height: 30px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--bc-text-soft);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .bc-node-traffic-periods button.is-active {
+      background: var(--bc-primary);
+      color: #fff;
+      box-shadow: var(--bc-shadow-xs);
+    }
+    table.bc-node-traffic-legacy-table {
+      table-layout: fixed;
+    }
+    table.bc-node-traffic-legacy-table th,
+    table.bc-node-traffic-legacy-table td {
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    table.bc-node-traffic-legacy-table th:nth-child(2),
+    table.bc-node-traffic-legacy-table td:nth-child(2) {
+      width: 26%;
+      white-space: normal;
+    }
+    .bc-node-traffic-node {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .bc-node-traffic-node strong {
+      overflow: hidden;
+      color: var(--bc-text);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .bc-node-traffic-node span {
+      color: var(--bc-text-soft);
+      font-size: 11px;
+      line-height: 1.3;
+    }
+    .bc-node-traffic-protocol {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: var(--bc-primary-soft);
+      color: var(--bc-primary-strong);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .bc-node-traffic-empty {
+      padding: 28px 12px !important;
+      color: var(--bc-text-soft);
+      text-align: center;
     }
     .bc-sub-import-row {
       display: flex;
@@ -150,25 +203,24 @@
       font-size: 12px;
     }
     @media (max-width: 768px) {
-      .bc-node-traffic-frame-wrap {
-        min-height: calc(100vh - 56px);
+      .bc-node-traffic-table-toolbar {
+        align-items: stretch;
+        flex-direction: column;
       }
-      .bc-node-traffic-frame {
-        min-height: calc(100vh - 56px);
+      .bc-node-traffic-periods {
+        justify-content: space-between;
       }
     }
   </style>
   <script>
     (function () {
       document.documentElement.classList.add('bc-user-polish')
-      var pageUrl = '/user-node-traffic.html'
       var menuText = '流量明细'
-      var nodeTrafficOpen = false
       var activeTitle = null
-      var activeFrame = null
-      var activeHost = null
       var insertMenuTimer = 0
       var subscribeDataPromise = null
+      var nodeTrafficPeriod = 'day'
+      var nodeTrafficRequestId = 0
       var titleCandidates = [
         '仪表盘',
         '使用文档',
@@ -234,10 +286,9 @@
 
       function ensureNodeTrafficInline(attempt, shouldScroll) {
         if (isTrafficDetailPage()) {
-          renderFrame(!!shouldScroll)
+          patchLegacyTrafficTable(!!shouldScroll)
           return
         }
-        if (nodeTrafficOpen) closeNodeTraffic()
         if (attempt >= 2) {
           return
         }
@@ -270,7 +321,7 @@
       function findLegacyTrafficTable() {
         var tables = Array.prototype.slice.call(document.querySelectorAll('table'))
         return tables.find(function (table) {
-          if (table.closest && table.closest('.bc-node-traffic-frame-wrap')) return false
+          if (table.dataset && table.dataset.bcNodeTrafficTable === '1') return true
           var text = textOf(table)
           return text.indexOf('记录时间') !== -1 &&
             text.indexOf('实际上行') !== -1 &&
@@ -306,7 +357,6 @@
       }
 
       function syncMenuState(active) {
-        document.body.classList.toggle('bc-node-traffic-open', !!active)
         Array.prototype.slice.call(document.querySelectorAll('.n-menu-item-content--selected')).forEach(function (node) {
           if (!node.dataset.bcWasSelected) node.dataset.bcWasSelected = '1'
         })
@@ -315,17 +365,6 @@
             delete node.dataset.bcWasSelected
           })
         }
-      }
-
-      function keepNodeTrafficChrome() {
-        if (!nodeTrafficOpen) return
-        syncMenuState(true)
-      }
-
-      function scheduleChromeSync() {
-        setTimeout(keepNodeTrafficChrome, 30)
-        setTimeout(keepNodeTrafficChrome, 160)
-        setTimeout(keepNodeTrafficChrome, 500)
       }
 
       function setTopTitleActive(active) {
@@ -396,33 +435,151 @@
         insertMenuTimer = window.setTimeout(function () {
           insertMenuTimer = 0
           removeLegacyNodeTrafficMenu()
-          ensureNodeTrafficInline(0)
+          ensureNodeTrafficInline(0, false)
           patchSubscribeImports()
         }, 80)
       }
 
-      function buildFrameUrl(token) {
-        var url = pageUrl + '?embed=1&inline=1'
-        if (token) url += '&auth_data=' + encodeURIComponent(token)
-        return url
-      }
-
-      function primeFrameAuth() {
+      function getNodeTrafficAuth() {
         var token = getAuthToken()
-        if (!token) return
-        try {
-          window.sessionStorage.setItem('bc_node_traffic_auth_data', token)
-        } catch (error) {}
-        return token
+        return token ? { Authorization: token } : {}
       }
 
-      function syncFrameAuth(frame, token) {
-        token = token || primeFrameAuth()
-        if (!token || !frame || !frame.contentWindow) return
-        frame.contentWindow && frame.contentWindow.postMessage({
-          type: 'bc-node-traffic-auth',
-          auth_data: token
-        }, window.location.origin)
+      function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) {
+          return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+          }[char]
+        })
+      }
+
+      function formatBytes(value) {
+        var bytes = Number(value || 0)
+        if (!isFinite(bytes) || bytes <= 0) return '0 B'
+        var units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+        var index = 0
+        while (bytes >= 1024 && index < units.length - 1) {
+          bytes /= 1024
+          index += 1
+        }
+        return (bytes >= 100 || index === 0 ? bytes.toFixed(0) : bytes.toFixed(2)).replace(/\.00$/, '') + ' ' + units[index]
+      }
+
+      function formatRate(value) {
+        var rate = Number(value)
+        if (!isFinite(rate)) return '-'
+        return rate.toFixed(rate % 1 === 0 ? 0 : 2) + 'x'
+      }
+
+      function formatTrafficTime(value, period) {
+        var timestamp = Number(value || 0)
+        if (!timestamp) return '-'
+        var date = new Date(timestamp * 1000)
+        var pad = function (number) {
+          return number < 10 ? '0' + number : String(number)
+        }
+        var day = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+        if (period === 'day') return day
+        return day + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes())
+      }
+
+      function ensureTrafficToolbar(table) {
+        var parent = table.parentElement
+        if (!parent) return null
+        var toolbar = parent.querySelector(':scope > .bc-node-traffic-table-toolbar')
+        if (!toolbar) {
+          toolbar = document.createElement('div')
+          toolbar.className = 'bc-node-traffic-table-toolbar'
+          toolbar.innerHTML = '<div><p class="bc-node-traffic-table-title">节点流量明细</p><p class="bc-node-traffic-table-desc">直接按节点列出实际用量、倍率和计费流量。</p></div><div class="bc-node-traffic-periods"><button type="button" data-period="day">按天</button><button type="button" data-period="hour">按小时</button><button type="button" data-period="minute">按分钟</button></div>'
+          parent.insertBefore(toolbar, table)
+          toolbar.addEventListener('click', function (event) {
+            var button = event.target && event.target.closest ? event.target.closest('button[data-period]') : null
+            if (!button) return
+            nodeTrafficPeriod = button.dataset.period || 'day'
+            table.dataset.bcNodeTrafficLoaded = ''
+            patchLegacyTrafficTable(false, true)
+          })
+        }
+        Array.prototype.slice.call(toolbar.querySelectorAll('button[data-period]')).forEach(function (button) {
+          button.classList.toggle('is-active', button.dataset.period === nodeTrafficPeriod)
+        })
+        return toolbar
+      }
+
+      function setNodeTrafficLoading(table, message) {
+        table.dataset.bcNodeTrafficTable = '1'
+        table.classList.add('bc-node-traffic-legacy-table')
+        var thead = table.tHead || table.createTHead()
+        var tbody = table.tBodies[0] || table.createTBody()
+        thead.innerHTML = '<tr><th>时间</th><th>节点</th><th>协议</th><th>倍率</th><th>实际上行</th><th>实际下行</th><th>实际使用</th><th>计费流量</th></tr>'
+        tbody.innerHTML = '<tr><td class="bc-node-traffic-empty" colspan="8">' + escapeHtml(message || '加载中...') + '</td></tr>'
+      }
+
+      function renderNodeTrafficRows(table, payload) {
+        var rows = payload && Array.isArray(payload.data) ? payload.data : []
+        var meta = payload && payload.meta ? payload.meta : {}
+        var tbody = table.tBodies[0] || table.createTBody()
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td class="bc-node-traffic-empty" colspan="8">' + escapeHtml(meta.note || '暂无节点维度流量数据') + '</td></tr>'
+          return
+        }
+        tbody.innerHTML = rows.map(function (row) {
+          var serverType = row.server_type || row.node_type || ''
+          var nodeId = row.server_id || row.id || ''
+          var nodeName = row.name || ('Node ' + nodeId)
+          var protocol = row.type || serverType || '-'
+          return '<tr>' +
+            '<td>' + escapeHtml(formatTrafficTime(row.record_at, nodeTrafficPeriod)) + '</td>' +
+            '<td><div class="bc-node-traffic-node"><strong title="' + escapeHtml(nodeName) + '">' + escapeHtml(nodeName) + '</strong><span>' + escapeHtml(serverType + (nodeId ? ':' + nodeId : '')) + '</span></div></td>' +
+            '<td><span class="bc-node-traffic-protocol">' + escapeHtml(protocol) + '</span></td>' +
+            '<td>' + escapeHtml(formatRate(row.rate)) + '</td>' +
+            '<td>' + escapeHtml(formatBytes(row.u)) + '</td>' +
+            '<td>' + escapeHtml(formatBytes(row.d)) + '</td>' +
+            '<td>' + escapeHtml(formatBytes(row.total || (Number(row.u || 0) + Number(row.d || 0)))) + '</td>' +
+            '<td>' + escapeHtml(formatBytes(row.cost)) + '</td>' +
+            '</tr>'
+        }).join('')
+      }
+
+      function patchLegacyTrafficTable(shouldScroll, forceReload) {
+        var table = findLegacyTrafficTable()
+        if (!table) return false
+        syncMenuState(true)
+        setTopTitleActive(true)
+        ensureTrafficToolbar(table)
+        if (table.dataset.bcNodeTrafficLoaded === nodeTrafficPeriod && !forceReload) {
+          return true
+        }
+        if (table.dataset.bcNodeTrafficLoading === nodeTrafficPeriod && !forceReload) {
+          return true
+        }
+        table.dataset.bcNodeTrafficLoaded = ''
+        table.dataset.bcNodeTrafficLoading = nodeTrafficPeriod
+        setNodeTrafficLoading(table, '加载节点流量明细...')
+        var requestId = ++nodeTrafficRequestId
+        fetch('/api/v1/user/stat/getNodeTrafficLog?period=' + encodeURIComponent(nodeTrafficPeriod) + '&include_total=1', {
+          headers: getNodeTrafficAuth()
+        }).then(function (response) {
+          if (!response.ok) throw new Error('getNodeTrafficLog ' + response.status)
+          return response.json()
+        }).then(function (payload) {
+          if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
+          setNodeTrafficLoading(table, '加载节点流量明细...')
+          renderNodeTrafficRows(table, payload || {})
+          table.dataset.bcNodeTrafficLoading = ''
+          table.dataset.bcNodeTrafficLoaded = nodeTrafficPeriod
+          ensureTrafficToolbar(table)
+          if (shouldScroll) table.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        }).catch(function () {
+          if (requestId !== nodeTrafficRequestId || !document.documentElement.contains(table)) return
+          table.dataset.bcNodeTrafficLoading = ''
+          setNodeTrafficLoading(table, '节点流量明细加载失败，请刷新后重试')
+        })
+        return true
       }
 
       function getSubscribeData() {
@@ -556,182 +713,10 @@
         return { left: sidebarRight, top: headerBottom }
       }
 
-      function findPageRootFromTitle() {
-        var title = findTopTitle()
-        if (!title) return null
-
-        var layout = measureLayout()
-        var current = title.parentElement
-        var best = null
-        for (var i = 0; current && current !== document.body && i < 10; i += 1) {
-          var rect = current.getBoundingClientRect()
-          if (rect.width >= 420 &&
-            rect.height >= 220 &&
-            rect.left >= layout.left - 24 &&
-            rect.top >= layout.top - 24 &&
-            !(current.closest && current.closest('aside, nav'))) {
-            best = current
-          }
-          current = current.parentElement
-        }
-        return best
-      }
-
-      function findLargestContentRoot() {
-        var layout = measureLayout()
-        var nodes = Array.prototype.slice.call(document.body.querySelectorAll('#app > *, .n-layout-content, main, [class*="content"], [class*="page"]'))
-        var candidates = nodes.filter(function (node) {
-          if (node.classList && node.classList.contains('bc-node-traffic-frame-wrap')) return false
-          if (node.closest && node.closest('aside, nav')) return false
-          var rect = node.getBoundingClientRect()
-          if (!rect.width || !rect.height) return false
-          return rect.left >= layout.left - 20 &&
-            rect.top >= layout.top - 36 &&
-            rect.width >= Math.min(520, window.innerWidth - layout.left - 32) &&
-            rect.height >= 180
-        }).sort(function (a, b) {
-          var ar = a.getBoundingClientRect()
-          var br = b.getBoundingClientRect()
-          return (br.width * br.height) - (ar.width * ar.height)
-        })
-
-        return candidates[0] || null
-      }
-
-      function findContentHost() {
-        if (activeHost && document.documentElement.contains(activeHost)) return activeHost
-
-        var legacyRoot = findLegacyTrafficRoot()
-        if (legacyRoot) {
-          activeHost = legacyRoot
-          return activeHost
-        }
-
-        var pageRoot = findPageRootFromTitle()
-        if (pageRoot) {
-          activeHost = pageRoot
-          return activeHost
-        }
-
-        var largestRoot = findLargestContentRoot()
-        if (largestRoot) {
-          activeHost = largestRoot
-          return activeHost
-        }
-
-        var layout = measureLayout()
-        var selectors = '.n-layout-content, main, [class*="content"], [class*="page"]'
-        var nodes = Array.prototype.slice.call(document.body.querySelectorAll(selectors))
-        var candidates = nodes.filter(function (node) {
-          if (node.classList && node.classList.contains('bc-node-traffic-frame-wrap')) return false
-          if (node.closest && node.closest('aside, nav')) return false
-          var rect = node.getBoundingClientRect()
-          if (!rect.width || !rect.height) return false
-          return rect.left >= layout.left - 12 &&
-            rect.top >= layout.top - 12 &&
-            rect.width >= 420 &&
-            rect.height >= 260
-        }).sort(function (a, b) {
-          var ar = a.getBoundingClientRect()
-          var br = b.getBoundingClientRect()
-          var aScore = Math.abs(ar.left - layout.left) + Math.abs(ar.top - layout.top)
-          var bScore = Math.abs(br.left - layout.left) + Math.abs(br.top - layout.top)
-          return aScore - bScore || (br.width * br.height) - (ar.width * ar.height)
-        })
-
-        activeHost = candidates[0] || document.querySelector('#app') || document.body
-        return activeHost
-      }
-
-      function updateFrameLayout() {
-        var wrap = document.querySelector('.bc-node-traffic-frame-wrap')
-        if (!wrap) return
-        var frame = wrap.querySelector('iframe')
-        var layout = measureLayout()
-        var height = Math.max(520, window.innerHeight - layout.top)
-        wrap.style.minHeight = height + 'px'
-        if (frame) frame.style.minHeight = height + 'px'
-      }
-
-      function closeNodeTraffic() {
-        nodeTrafficOpen = false
-        var old = document.querySelector('.bc-node-traffic-frame-wrap')
-        if (old) old.remove()
-        activeFrame = null
-        if (activeHost) activeHost.classList.remove('bc-node-traffic-content-host')
-        activeHost = null
-        syncMenuState(false)
-      }
-
       function handleRouteChange() {
-        closeNodeTraffic()
-      }
-
-      function renderFrame(shouldScroll) {
-        var title = findTopTitle()
-        if (!isTrafficDetailPage()) {
-          syncMenuState(false)
-          return
-        }
-
-        nodeTrafficOpen = true
-        syncMenuState(true)
-        var legacyRoot = findLegacyTrafficRoot()
-        var legacyTable = findLegacyTrafficTable()
-        var existing = document.querySelector('.bc-node-traffic-frame-wrap')
-        if (existing) {
-          if (legacyTable || (legacyRoot && !legacyRoot.contains(existing))) {
-            existing.remove()
-            if (activeHost) activeHost.classList.remove('bc-node-traffic-content-host')
-            activeFrame = null
-            activeHost = null
-          } else {
-            scheduleChromeSync()
-            updateFrameLayout()
-            syncFrameAuth(existing.querySelector('iframe'))
-            scheduleChromeSync()
-            if (shouldScroll) existing.scrollIntoView({ block: 'start', behavior: 'smooth' })
-            return
-          }
-        }
-
-        if (legacyRoot) {
-          activeHost = legacyRoot
-        }
-        var token = primeFrameAuth()
-        var host = legacyRoot || findContentHost()
-        scheduleChromeSync()
-        var wrap = document.createElement('div')
-        wrap.className = 'bc-node-traffic-frame-wrap'
-        var head = document.createElement('div')
-        head.className = 'bc-node-traffic-inline-head'
-        head.innerHTML = '<div><h2 class="bc-node-traffic-inline-title">流量明细</h2><p class="bc-node-traffic-inline-desc">按节点查看实际用量、倍率和计费流量。</p></div>'
-        var frame = document.createElement('iframe')
-        frame.className = 'bc-node-traffic-frame'
-        frame.src = buildFrameUrl(token)
-        frame.title = menuText
-        frame.addEventListener('load', function () {
-          syncFrameAuth(frame, token)
-        })
-        wrap.appendChild(head)
-        wrap.appendChild(frame)
-        if (legacyRoot && host && host !== document.body && host.id !== 'app') {
-          host.innerHTML = ''
-          host.appendChild(wrap)
-          host.classList.remove('bc-node-traffic-content-host')
-        } else {
-          host.appendChild(wrap)
-          if (host !== document.body && host.id !== 'app') {
-            host.classList.add('bc-node-traffic-content-host')
-          }
-        }
-        activeHost = host
-        activeFrame = frame
-        updateFrameLayout()
-        syncFrameAuth(frame, token)
-        syncMenuState(true)
-        scheduleChromeSync()
-        if (shouldScroll) wrap.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        setTopTitleActive(false)
+        syncMenuState(false)
+        schedulePatch()
       }
 
       function removeLegacyNodeTrafficMenu() {
@@ -743,12 +728,7 @@
       var observer = new MutationObserver(schedulePatch)
       observer.observe(document.documentElement, { childList: true, subtree: true })
       window.addEventListener('hashchange', handleRouteChange)
-      window.addEventListener('resize', updateFrameLayout)
-      window.addEventListener('message', function (event) {
-        if (event.origin !== window.location.origin) return
-        if (!event.data || event.data.type !== 'bc-node-traffic-need-auth') return
-        syncFrameAuth(activeFrame)
-      })
+      window.addEventListener('resize', schedulePatch)
       window.addEventListener('load', schedulePatch)
       setTimeout(schedulePatch, 800)
       setTimeout(schedulePatch, 2000)
