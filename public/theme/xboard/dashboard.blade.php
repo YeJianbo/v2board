@@ -83,13 +83,26 @@
       font-size: 12px;
       line-height: 30px;
       cursor: pointer;
-      transition: color .15s ease, background-color .15s ease;
+      transition: color .15s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+    }
+    .bc-node-traffic-periods button:hover:not(.is-active),
+    .bc-node-traffic-periods button:focus-visible:not(.is-active) {
+      border-color: var(--bc-primary-border);
+      background: var(--bc-primary-soft);
+      color: var(--bc-primary);
+      outline: none;
     }
     .bc-node-traffic-periods button.is-active {
       background: var(--bc-primary);
       border-color: var(--bc-primary);
       color: #fff;
       box-shadow: var(--bc-shadow-xs);
+    }
+    .bc-node-traffic-periods button.is-active:hover,
+    .bc-node-traffic-periods button.is-active:focus-visible {
+      background: var(--bc-primary-strong);
+      border-color: var(--bc-primary-strong);
+      outline: none;
     }
     table.bc-node-traffic-legacy-table {
       width: 100%;
@@ -162,10 +175,23 @@
       cursor: pointer;
       transition: color .15s ease, background-color .15s ease, border-color .15s ease;
     }
+    .bc-node-traffic-pagination button:hover:not(:disabled):not(.is-active),
+    .bc-node-traffic-pagination button:focus-visible:not(:disabled):not(.is-active) {
+      border-color: var(--bc-primary-border);
+      background: var(--bc-primary-soft);
+      color: var(--bc-primary);
+      outline: none;
+    }
     .bc-node-traffic-pagination button.is-active {
       border-color: var(--bc-primary);
       background: var(--bc-primary);
       color: #fff;
+    }
+    .bc-node-traffic-pagination button.is-active:hover,
+    .bc-node-traffic-pagination button.is-active:focus-visible {
+      border-color: var(--bc-primary-strong);
+      background: var(--bc-primary-strong);
+      outline: none;
     }
     .bc-node-traffic-pagination button:disabled {
       cursor: not-allowed;
