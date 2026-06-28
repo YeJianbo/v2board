@@ -236,10 +236,31 @@ class MachineController extends Controller
     private function touchMachineHeartbeat(Machine $machine, Request $request, array $extraStatus = []): void
     {
         $status = $this->decodeMachineStatus($machine);
+        $previousReportedAt = (int) ($status['reported_at'] ?? 0);
+        $now = time();
         $remoteIp = $this->resolveRequestRemoteIp($request);
         $reportedIp = trim((string) ($extraStatus['ip'] ?? ($status['ip'] ?? '')));
         $primaryIp = $this->resolvePrimaryIp($reportedIp, $remoteIp);
         $previousPrimaryIp = trim((string) ($status['primary_ip'] ?? ''));
+
+        foreach ([
+            'net_in' => 'net_in_rate',
+            'net_out' => 'net_out_rate',
+        ] as $totalKey => $rateKey) {
+            if (!array_key_exists($totalKey, $extraStatus) || !is_numeric($extraStatus[$totalKey])) {
+                continue;
+            }
+
+            $currentTotal = (float) $extraStatus[$totalKey];
+            $previousTotal = isset($status[$totalKey]) && is_numeric($status[$totalKey])
+                ? (float) $status[$totalKey]
+                : null;
+            $elapsed = $previousReportedAt > 0 ? $now - $previousReportedAt : 0;
+
+            if ($previousTotal !== null && $elapsed > 0 && $elapsed <= 600) {
+                $status[$rateKey] = round(max(0, $currentTotal - $previousTotal) / $elapsed, 2);
+            }
+        }
 
         if ($remoteIp !== '') {
             $status['remote_ip'] = $remoteIp;
@@ -247,7 +268,7 @@ class MachineController extends Controller
         if ($primaryIp !== '') {
             $status['primary_ip'] = $primaryIp;
         }
-        $status['reported_at'] = time();
+        $status['reported_at'] = $now;
 
         foreach ($extraStatus as $key => $value) {
             if ($value === null || $value === '') {
