@@ -37,10 +37,13 @@ class Bind extends Telegram {
             case 2:
                 $usertoken = Cache::get("totp_{$token}");
                 if (!$usertoken) {
-                    $timestep = (int)config('v2board.show_subscribe_expire', 5) * 60;
+                    $timestep = Helper::getSubscribeExpireSeconds();
                     $counter = floor(time() / $timestep);
                     $counterBytes = pack('N*', 0) . pack('N*', $counter);
                     $idhash = Helper::base64DecodeUrlSafe($token);
+                    if (!$idhash || strpos($idhash, ':') === false) {
+                        abort(403, 'token is error');
+                    }
                     $parts = explode(':', $idhash, 2);
                     [$userid, $clienthash] = $parts;
                     if (!$userid || !$clienthash) {
@@ -52,10 +55,17 @@ class Bind extends Telegram {
                     }
                     $usertoken = $user->token;
                     $hash = hash_hmac('sha1', $counterBytes, $usertoken, false);
-                    if ($clienthash !== $hash) {
+                    if (!hash_equals($hash, $clienthash)) {
                         abort(403, 'token is error');
                     }
                     Cache::put("totp_{$token}", $usertoken, $timestep);
+                }
+                $token = $usertoken;
+                break;
+            case 3:
+                $usertoken = Cache::get("dynsub_{$token}");
+                if (!$usertoken) {
+                    abort(403, 'token is error');
                 }
                 $token = $usertoken;
                 break;

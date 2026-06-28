@@ -445,6 +445,7 @@
       var nodeTrafficEndAt = ''
       var nodeTrafficPatchVersion = '20260628-traffic-range-filter'
       var subscribeInfoCache = null
+      var subscribeInfoCacheExpiresAt = 0
       var subscribeInfoLoading = null
       var titleCandidates = [
         '仪表盘',
@@ -787,7 +788,10 @@
       }
 
       function getUserSubscribeInfo() {
-        if (subscribeInfoCache) return Promise.resolve(subscribeInfoCache)
+        var now = Date.now()
+        if (subscribeInfoCache && (!subscribeInfoCache.subscribe_url_dynamic || now < subscribeInfoCacheExpiresAt - 15000)) {
+          return Promise.resolve(subscribeInfoCache)
+        }
         if (subscribeInfoLoading) return subscribeInfoLoading
         subscribeInfoLoading = fetch('/api/v1/user/getSubscribe', {
           headers: getAuthHeaders()
@@ -796,6 +800,12 @@
           return response.json()
         }).then(function (payload) {
           subscribeInfoCache = payload && payload.data ? payload.data : null
+          if (subscribeInfoCache && subscribeInfoCache.subscribe_url_dynamic) {
+            var ttl = Number(subscribeInfoCache.subscribe_url_expire_seconds || 300)
+            subscribeInfoCacheExpiresAt = Date.now() + Math.max(60, ttl) * 1000
+          } else {
+            subscribeInfoCacheExpiresAt = Number.POSITIVE_INFINITY
+          }
           subscribeInfoLoading = null
           return subscribeInfoCache
         }).catch(function (error) {

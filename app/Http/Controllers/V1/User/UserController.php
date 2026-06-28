@@ -344,7 +344,10 @@ class UserController extends Controller
         }
         $user['alive_ip'] = $countalive;
 
+        $subscribeMethod = (int) config('v2board.show_subscribe_method', 0);
         $user['subscribe_url'] = Helper::getSubscribeUrl($user['token']);
+        $user['subscribe_url_dynamic'] = in_array($subscribeMethod, [2, 3], true);
+        $user['subscribe_url_expire_seconds'] = Helper::getSubscribeExpireSeconds();
 
         $userService = new UserService();
         $user['reset_day'] = $userService->getResetDay($user);

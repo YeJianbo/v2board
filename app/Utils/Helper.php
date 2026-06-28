@@ -119,15 +119,15 @@ class Helper
         $path = config('v2board.subscribe_path', '/api/v1/client/subscribe');
         if (empty($path)) {
             $path = '/api/v1/client/subscribe';
-        } 
-        $subscribeUrls = explode(',', config('v2board.subscribe_url'));
-        $subscribeUrl = $subscribeUrls[rand(0, count($subscribeUrls) - 1)];
+        }
+        if (strpos($path, '/') !== 0) {
+            $path = "/{$path}";
+        }
+        $subscribeUrls = array_values(array_filter(array_map('trim', explode(',', (string) config('v2board.subscribe_url')))));
+        $subscribeUrl = count($subscribeUrls) ? $subscribeUrls[random_int(0, count($subscribeUrls) - 1)] : '';
         switch ($submethod) {
             case 0:
-                $path = "{$path}?token={$token}";
-                if ($subscribeUrl) return $subscribeUrl . $path;
-                return url($path);
-                break;
+                return self::buildSubscribeUrl($path, $subscribeUrl, $token);
             case 1:
                 $newtoken = Cache::get("otp_{$token}");
                 if (!$newtoken) {
@@ -139,23 +139,40 @@ class Helper
                         $newtoken = Cache::get("otp_{$token}");
                     }
                 }
-                $path = "{$path}?token={$newtoken}";
-                if ($subscribeUrl) return $subscribeUrl . $path;
-                return url($path);
-                break;
+                return self::buildSubscribeUrl($path, $subscribeUrl, $newtoken);
             case 2:
-                $timestep = (int)config('v2board.show_subscribe_expire', 5) * 60;
+                $timestep = self::getSubscribeExpireSeconds();
                 $counter = floor(time() / $timestep);
                 $counterBytes = pack('N*', 0) . pack('N*', $counter);
                 $hash = hash_hmac('sha1', $counterBytes, $token, false);
                 $user = User::where('token', $token)->select('id')->first();
+                if (!$user) {
+                    return self::buildSubscribeUrl($path, $subscribeUrl, $token);
+                }
                 $newtoken = self::base64EncodeUrlSafe("{$user->id}:{$hash}");
 
-                $path = "{$path}?token={$newtoken}";
-                if ($subscribeUrl) return $subscribeUrl . $path;
-                return url($path);
-                break;
+                return self::buildSubscribeUrl($path, $subscribeUrl, $newtoken);
+            case 3:
+                $newtoken = self::base64EncodeUrlSafe(random_bytes(32));
+                Cache::put("dynsub_{$newtoken}", $token, self::getSubscribeExpireSeconds());
+                return self::buildSubscribeUrl($path, $subscribeUrl, $newtoken);
+            default:
+                return self::buildSubscribeUrl($path, $subscribeUrl, $token);
         }
+    }
+
+    public static function getSubscribeExpireSeconds()
+    {
+        $minutes = (int)config('v2board.show_subscribe_expire', 5);
+        $minutes = max(1, min(1440, $minutes));
+        return $minutes * 60;
+    }
+
+    private static function buildSubscribeUrl($path, $subscribeUrl, $token)
+    {
+        $path = "{$path}?token={$token}";
+        if ($subscribeUrl) return rtrim($subscribeUrl, '/') . $path;
+        return url($path);
     }
 
     public static function randomPort($range) {
