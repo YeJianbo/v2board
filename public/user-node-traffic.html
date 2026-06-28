@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>节点流量明细</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --card: #fff;
+      --text: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --primary: #0f766e;
+      --primary-soft: #e6fffb;
+      --danger: #b91c1c;
+      --shadow: 0 10px 30px rgba(15, 23, 42, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "Noto Sans SC", sans-serif;
+    }
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 28px auto 40px;
+    }
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      line-height: 1.25;
+    }
+    .sub {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .segmented {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--card);
+    }
+    button {
+      height: 34px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button.active {
+      background: var(--primary);
+      color: #fff;
+    }
+    button.primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .card-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .status.error {
+      color: var(--danger);
+    }
+    .chart-wrap {
+      padding: 18px;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 360px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 14px 18px 0;
+    }
+    .metric {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fafafa;
+    }
+    .metric span {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .metric strong {
+      font-size: 18px;
+    }
+    .node-list {
+      padding: 12px;
+      max-height: 544px;
+      overflow: auto;
+    }
+    .node-item {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 10px;
+      padding: 10px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .node-item:hover {
+      background: #f9fafb;
+    }
+    .node-name {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .node-type {
+      flex: 0 0 auto;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--primary-soft);
+      color: #047857;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    .node-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .table-wrap {
+      margin-top: 16px;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      white-space: nowrap;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      background: #fafafa;
+    }
+    .empty {
+      padding: 42px 18px;
+      color: var(--muted);
+      text-align: center;
+    }
+    @media (max-width: 900px) {
+      .topbar { display: block; }
+      .toolbar { margin-top: 14px; }
+      .grid { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: 1fr; }
+      canvas { height: 300px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <h1>节点流量明细</h1>
+        <p class="sub">按节点查看个人用量、倍率扣费和时间曲线。</p>
+      </div>
+      <div class="toolbar">
+        <div class="segmented" id="periods">
+          <button data-period="minute">分钟</button>
+          <button data-period="hour">小时</button>
+          <button data-period="day" class="active">天</button>
+        </div>
+        <button class="primary" id="refresh">刷新</button>
+      </div>
+    </header>
+
+    <section class="grid">
+      <div class="card">
+        <div class="card-head">
+          <h2 class="card-title">用量曲线</h2>
+          <span class="status" id="status">准备加载</span>
+        </div>
+        <div class="summary">
+          <div class="metric"><span>总流量</span><strong id="totalTraffic">0 B</strong></div>
+          <div class="metric"><span>上行</span><strong id="uploadTraffic">0 B</strong></div>
+          <div class="metric"><span>下行</span><strong id="downloadTraffic">0 B</strong></div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chart" width="900" height="360"></canvas>
+        </div>
+      </div>
+
+      <aside class="card">
+        <div class="card-head">
+          <h2 class="card-title">节点筛选</h2>
+          <button id="selectAll">全选</button>
+        </div>
+        <div class="node-list" id="nodeList"></div>
+      </aside>
+    </section>
+
+    <section class="card table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>节点</th>
+            <th>协议</th>
+            <th>倍率</th>
+            <th>上行</th>
+            <th>下行</th>
+            <th>合计</th>
+            <th>扣费</th>
+          </tr>
+        </thead>
+        <tbody id="logRows"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      period: 'day',
+      selected: new Set(),
+      payload: null,
+    };
+
+    const colors = ['#0f766e', '#2563eb', '#dc2626', '#7c3aed', '#ea580c', '#0891b2', '#4d7c0f', '#be123c'];
+
+    function formatBytes(value) {
+      const bytes = Number(value || 0);
+      if (!bytes) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / Math.pow(1024, index)).toFixed(index ? 2 : 0)} ${units[index]}`;
+    }
+
+    function findTokenInValue(value) {
+      if (!value) return '';
+      if (typeof value === 'string' && value.length > 20 && !value.includes('{')) return value;
+      try {
+        const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+        const stack = [parsed];
+        while (stack.length) {
+          const item = stack.pop();
+          if (!item || typeof item !== 'object') continue;
+          for (const key of Object.keys(item)) {
+            const lower = key.toLowerCase();
+            const child = item[key];
+            if (typeof child === 'string' && ['auth_data', 'authorization', 'token', 'access_token'].includes(lower) && child.length > 20) {
+              return child;
+            }
+            if (child && typeof child === 'object') stack.push(child);
+          }
+        }
+      } catch (error) {}
+      return '';
+    }
+
+    function getAuthToken() {
+      const params = new URLSearchParams(location.search);
+      if (params.get('auth_data')) return params.get('auth_data');
+      const directKeys = ['auth_data', 'authorization', 'token', 'access_token', 'user_token'];
+      for (const key of directKeys) {
+        const token = findTokenInValue(localStorage.getItem(key));
+        if (token) return token;
+      }
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        const token = findTokenInValue(localStorage.getItem(key));
+        if (token) return token;
+      }
+      return '';
+    }
+
+    function setStatus(text, isError = false) {
+      const el = document.getElementById('status');
+      el.textContent = text;
+      el.classList.toggle('error', isError);
+    }
+
+    function renderNodes(summary) {
+      const list = document.getElementById('nodeList');
+      if (!summary.length) {
+        list.innerHTML = '<div class="empty">暂无节点流量记录</div>';
+        return;
+      }
+      list.innerHTML = summary.map((node) => `
+        <label class="node-item">
+          <input type="checkbox" value="${node.key}" ${state.selected.has(node.key) ? 'checked' : ''}>
+          <span>
+            <span class="node-name">
+              <span>${node.name}</span>
+              <span class="node-type">${node.type}</span>
+            </span>
+            <span class="node-meta">${formatBytes(node.total)} / 扣费 ${formatBytes(node.cost)}</span>
+          </span>
+        </label>
+      `).join('');
+      list.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        input.addEventListener('change', () => {
+          input.checked ? state.selected.add(input.value) : state.selected.delete(input.value);
+          renderAll();
+        });
+      });
+    }
+
+    function renderSummary(summary) {
+      const selected = summary.filter((node) => state.selected.has(node.key));
+      const rows = selected.length ? selected : summary;
+      const total = rows.reduce((sum, item) => sum + Number(item.total || 0), 0);
+      const upload = rows.reduce((sum, item) => sum + Number(item.u || 0), 0);
+      const download = rows.reduce((sum, item) => sum + Number(item.d || 0), 0);
+      document.getElementById('totalTraffic').textContent = formatBytes(total);
+      document.getElementById('uploadTraffic').textContent = formatBytes(upload);
+      document.getElementById('downloadTraffic').textContent = formatBytes(download);
+    }
+
+    function drawChart(payload) {
+      const canvas = document.getElementById('chart');
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.max(600, Math.floor(rect.width * ratio));
+      canvas.height = Math.max(300, Math.floor(rect.height * ratio));
+      const ctx = canvas.getContext('2d');
+      ctx.scale(ratio, ratio);
+      const width = canvas.width / ratio;
+      const height = canvas.height / ratio;
+      ctx.clearRect(0, 0, width, height);
+
+      const series = (payload.series?.series || []).filter((item) => item.key === 'total' || state.selected.has(item.key));
+      const renderSeries = series.length ? series : (payload.series?.series || []).filter((item) => item.key === 'total');
+      const points = renderSeries.flatMap((item) => item.points || []);
+      const max = Math.max(1, ...points.map((point) => Number(point.total || 0)));
+      const left = 54;
+      const right = 18;
+      const top = 24;
+      const bottom = 42;
+      const chartWidth = width - left - right;
+      const chartHeight = height - top - bottom;
+
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 1;
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#6b7280';
+      for (let i = 0; i <= 4; i += 1) {
+        const y = top + chartHeight * i / 4;
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(left + chartWidth, y);
+        ctx.stroke();
+        ctx.fillText(formatBytes(max * (4 - i) / 4), 8, y + 4);
+      }
+
+      const labels = payload.series?.labels || [];
+      const labelStep = Math.max(1, Math.ceil(labels.length / 8));
+      labels.forEach((label, index) => {
+        if (index % labelStep !== 0 && index !== labels.length - 1) return;
+        const x = left + (labels.length <= 1 ? 0 : chartWidth * index / (labels.length - 1));
+        ctx.fillText(label, x - 16, height - 14);
+      });
+
+      renderSeries.forEach((item, index) => {
+        const lineColor = item.key === 'total' ? '#111827' : colors[index % colors.length];
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = item.key === 'total' ? 2.4 : 1.8;
+        ctx.beginPath();
+        (item.points || []).forEach((point, pointIndex, arr) => {
+          const x = left + (arr.length <= 1 ? 0 : chartWidth * pointIndex / (arr.length - 1));
+          const y = top + chartHeight - chartHeight * Number(point.total || 0) / max;
+          pointIndex === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+    }
+
+    function renderLogs(logs) {
+      const tbody = document.getElementById('logRows');
+      const selectedLogs = state.selected.size ? logs.filter((log) => state.selected.has(`${log.node_type}:${log.server_id}`)) : logs;
+      if (!selectedLogs.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty">暂无明细</td></tr>';
+        return;
+      }
+      tbody.innerHTML = selectedLogs.slice(0, 300).map((log) => `
+        <tr>
+          <td>${new Date(Number(log.record_at) * 1000).toLocaleString()}</td>
+          <td>${log.name || `Node ${log.server_id}`}</td>
+          <td>${log.type || log.node_type || ''}</td>
+          <td>x ${Number(log.rate || 1).toFixed(2)}</td>
+          <td>${formatBytes(log.u)}</td>
+          <td>${formatBytes(log.d)}</td>
+          <td>${formatBytes(log.total)}</td>
+          <td>${formatBytes(log.cost)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderAll() {
+      if (!state.payload) return;
+      renderSummary(state.payload.summary || []);
+      drawChart(state.payload);
+      renderLogs(state.payload.data || []);
+    }
+
+    async function loadData() {
+      const token = getAuthToken();
+      if (!token) {
+        setStatus('未检测到登录态，请先在用户中心登录', true);
+        return;
+      }
+      setStatus('加载中');
+      const params = new URLSearchParams({ period: state.period, include_total: '1' });
+      if (state.selected.size) {
+        for (const key of state.selected) params.append('node_keys[]', key);
+      }
+      const response = await fetch(`/api/v1/user/stat/getNodeTrafficLog?${params.toString()}`, {
+        headers: { authorization: token },
+      });
+      if (!response.ok) {
+        setStatus(`加载失败：${response.status}`, true);
+        return;
+      }
+      state.payload = await response.json();
+      const summary = state.payload.summary || [];
+      if (!state.selected.size) {
+        summary.slice(0, 8).forEach((node) => state.selected.add(node.key));
+      }
+      renderNodes(summary);
+      renderAll();
+      setStatus(state.payload.meta?.note || '已更新');
+    }
+
+    document.getElementById('periods').addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-period]');
+      if (!button) return;
+      state.period = button.dataset.period;
+      document.querySelectorAll('#periods button').forEach((item) => item.classList.toggle('active', item === button));
+      loadData();
+    });
+    document.getElementById('refresh').addEventListener('click', loadData);
+    document.getElementById('selectAll').addEventListener('click', () => {
+      const summary = state.payload?.summary || [];
+      if (state.selected.size === summary.length) {
+        state.selected.clear();
+      } else {
+        summary.forEach((node) => state.selected.add(node.key));
+      }
+      renderNodes(summary);
+      renderAll();
+    });
+    window.addEventListener('resize', renderAll);
+    loadData();
+  </script>
+</body>
+</html>

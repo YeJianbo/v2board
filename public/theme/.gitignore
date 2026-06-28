@@ -1,4 +1,6 @@
 /*
 !v2board
 !default
+!xboard
+!xboard/**
 !.gitignore
