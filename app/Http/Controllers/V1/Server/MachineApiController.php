@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\V1\Server;
 
 use App\Http\Controllers\Controller;
-use App\Models\Machine;
 use Illuminate\Http\Request;
 
 class MachineApiController extends Controller
@@ -11,7 +10,7 @@ class MachineApiController extends Controller
     // High security: strictly check token
     protected function authenticate(Request $request)
     {
-        abort(404);
+        abort(410, 'Legacy unsigned machine API is disabled');
     }
 
     public function pushStatus(Request $request)
