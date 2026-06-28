@@ -37,11 +37,11 @@ class ConfigController extends Controller
     {
         $mailLog = MailService::sendEmail([
             'email' => $request->user()->email,
-            'subject' => 'This is xboard test email',
+            'subject' => 'This is BunCloud test email',
             'template_name' => 'notify',
             'template_value' => [
-                'name' => admin_setting('app_name', 'XBoard'),
-                'content' => 'This is xboard test email',
+                'name' => admin_setting('app_name', 'BunCloud'),
+                'content' => 'This is BunCloud test email',
                 'url' => admin_setting('app_url')
             ]
         ]);
@@ -107,8 +107,8 @@ class ConfigController extends Controller
                 'logo' => admin_setting('logo'),
                 'force_https' => (int) admin_setting('force_https', 0),
                 'stop_register' => (int) admin_setting('stop_register', 0),
-                'app_name' => admin_setting('app_name', 'XBoard'),
-                'app_description' => admin_setting('app_description', 'XBoard is best!'),
+                'app_name' => admin_setting('app_name', 'BunCloud'),
+                'app_description' => admin_setting('app_description', 'BunCloud service panel'),
                 'app_url' => admin_setting('app_url'),
                 'subscribe_url' => admin_setting('subscribe_url'),
                 'try_out_plan_id' => (int) admin_setting('try_out_plan_id', 0),
@@ -132,7 +132,7 @@ class ConfigController extends Controller
                 'subscribe_path' => admin_setting('subscribe_path', 's'),
             ],
             'frontend' => [
-                'frontend_theme' => admin_setting('frontend_theme', 'Xboard'),
+                'frontend_theme' => admin_setting('frontend_theme', 'xboard'),
                 'frontend_theme_sidebar' => admin_setting('frontend_theme_sidebar', 'light'),
                 'frontend_theme_header' => admin_setting('frontend_theme_header', 'dark'),
                 'frontend_theme_color' => admin_setting('frontend_theme_color', 'default'),

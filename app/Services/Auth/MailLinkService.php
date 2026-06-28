@@ -61,11 +61,11 @@ class MailLinkService
         SendEmailJob::dispatch([
             'email' => $user->email,
             'subject' => __('Login to :name', [
-                'name' => admin_setting('app_name', 'XBoard')
+                'name' => admin_setting('app_name', 'BunCloud')
             ]),
             'template_name' => 'mailLogin',
             'template_value' => [
-                'name' => admin_setting('app_name', 'XBoard'),
+                'name' => admin_setting('app_name', 'BunCloud'),
                 'link' => $link,
                 'url' => admin_setting('app_url')
             ]
