@@ -299,6 +299,8 @@
       authToken: '',
       waitingParentAuth: false,
       loading: false,
+      pendingLoad: false,
+      requestSeq: 0,
     };
 
     const isEmbedded = new URLSearchParams(location.search).get('embed') === '1';
@@ -376,9 +378,28 @@
       el.classList.toggle('error', isError);
     }
 
+    function updateSelectButton(summary = state.payload?.summary || []) {
+      const button = document.getElementById('selectAll');
+      if (!summary.length) {
+        button.textContent = '全选';
+        button.disabled = true;
+        return;
+      }
+      button.disabled = false;
+      if (!state.selected.size) {
+        button.textContent = '选择全部节点';
+      } else if (state.selected.size >= summary.length) {
+        button.textContent = '只看总计';
+      } else {
+        button.textContent = '全选';
+      }
+    }
+
     function renderNodes(summary) {
       const list = document.getElementById('nodeList');
       if (!summary.length) {
+        state.selected.clear();
+        updateSelectButton(summary);
         list.innerHTML = '<div class="empty">暂无节点流量记录</div>';
         return;
       }
@@ -386,9 +407,7 @@
       state.selected.forEach((key) => {
         if (!validKeys.has(key)) state.selected.delete(key);
       });
-      if (!state.selected.size) {
-        summary.slice(0, 8).forEach((node) => state.selected.add(node.key));
-      }
+      updateSelectButton(summary);
       list.innerHTML = summary.map((node) => `
         <label class="node-item">
           <input type="checkbox" value="${escapeHtml(node.key)}" ${state.selected.has(node.key) ? 'checked' : ''}>
@@ -404,6 +423,7 @@
       list.querySelectorAll('input[type="checkbox"]').forEach((input) => {
         input.addEventListener('change', () => {
           input.checked ? state.selected.add(input.value) : state.selected.delete(input.value);
+          updateSelectButton(summary);
           renderAll();
         });
       });
@@ -432,8 +452,10 @@
       const height = canvas.height / ratio;
       ctx.clearRect(0, 0, width, height);
 
-      const series = (payload.series?.series || []).filter((item) => item.key === 'total' || state.selected.has(item.key));
-      const renderSeries = series.length ? series : (payload.series?.series || []).filter((item) => item.key === 'total');
+      const allSeries = payload.series?.series || [];
+      const renderSeries = state.selected.size
+        ? allSeries.filter((item) => item.key !== 'total' && state.selected.has(item.key))
+        : allSeries.filter((item) => item.key === 'total');
       const points = renderSeries.flatMap((item) => item.points || []);
       const max = Math.max(1, ...points.map((point) => Number(point.total || 0)));
       const left = 54;
@@ -507,7 +529,10 @@
     }
 
     async function loadData() {
-      if (state.loading) return;
+      if (state.loading) {
+        state.pendingLoad = true;
+        return;
+      }
       const token = getAuthToken();
       if (!token) {
         if (isEmbedded) {
@@ -520,26 +545,36 @@
         return;
       }
       state.loading = true;
+      state.pendingLoad = false;
       state.waitingParentAuth = false;
+      const requestPeriod = state.period;
+      const requestId = ++state.requestSeq;
       setStatus('加载中');
       try {
-        const params = new URLSearchParams({ period: state.period, include_total: '1' });
+        const params = new URLSearchParams({ period: requestPeriod, include_total: '1' });
         const response = await fetch(`/api/v1/user/stat/getNodeTrafficLog?${params.toString()}`, {
           headers: { Authorization: token },
         });
+        if (requestId !== state.requestSeq || requestPeriod !== state.period) return;
         if (!response.ok) {
           if (response.status === 403 && isEmbedded) {
-            state.authToken = '';
+            if (!state.authToken || state.authToken === token) {
+              state.authToken = '';
+            }
             state.waitingParentAuth = true;
-            try {
-              sessionStorage.removeItem('bc_node_traffic_auth_data');
-            } catch (error) {}
+            if (!state.authToken) {
+              try {
+                sessionStorage.removeItem('bc_node_traffic_auth_data');
+              } catch (error) {}
+            }
             window.parent.postMessage({ type: 'bc-node-traffic-need-auth' }, window.location.origin);
           }
           setStatus(response.status === 403 ? '登录态无效，请刷新用户中心后重试' : `加载失败：${response.status}`, true);
           return;
         }
-        state.payload = await response.json();
+        const payload = await response.json();
+        if (requestId !== state.requestSeq || requestPeriod !== state.period) return;
+        state.payload = payload;
         const summary = state.payload.summary || [];
         renderNodes(summary);
         renderAll();
@@ -548,6 +583,10 @@
         setStatus(`加载失败：${error.message || '网络异常'}`, true);
       } finally {
         state.loading = false;
+        if (state.pendingLoad) {
+          state.pendingLoad = false;
+          loadData();
+        }
       }
     }
 
@@ -556,6 +595,7 @@
       if (!button) return;
       if (state.period === button.dataset.period) return;
       state.period = button.dataset.period;
+      state.requestSeq += 1;
       state.selected.clear();
       state.payload = null;
       document.querySelectorAll('#periods button').forEach((item) => item.classList.toggle('active', item === button));
