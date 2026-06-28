@@ -179,6 +179,19 @@
       text-align: center;
       color: var(--bc-text-soft);
     }
+    .bc-subscribe-client-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--bc-primary-soft);
+      color: var(--bc-primary);
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 1;
+    }
     @media (max-width: 768px) {
       .bc-node-traffic-periods {
         width: 100%;
@@ -205,6 +218,8 @@
       var nodeTrafficPayloadCache = {}
       var nodeTrafficPageMap = {}
       var nodeTrafficPageSize = 10
+      var subscribeInfoCache = null
+      var subscribeInfoLoading = null
       var titleCandidates = [
         '仪表盘',
         '使用文档',
@@ -527,6 +542,83 @@
 
       function getNodeTrafficHeaders(token) {
         return token ? { authorization: token } : {}
+      }
+
+      function getAuthHeaders() {
+        var token = getAuthToken()
+        return token ? { authorization: token } : {}
+      }
+
+      function getUserSubscribeInfo() {
+        if (subscribeInfoCache) return Promise.resolve(subscribeInfoCache)
+        if (subscribeInfoLoading) return subscribeInfoLoading
+        subscribeInfoLoading = fetch('/api/v1/user/getSubscribe', {
+          headers: getAuthHeaders()
+        }).then(function (response) {
+          if (!response.ok) throw new Error('getSubscribe ' + response.status)
+          return response.json()
+        }).then(function (payload) {
+          subscribeInfoCache = payload && payload.data ? payload.data : null
+          subscribeInfoLoading = null
+          return subscribeInfoCache
+        }).catch(function (error) {
+          subscribeInfoLoading = null
+          if (window.console && console.warn) console.warn('[subscribe-import] load failed', error)
+          throw error
+        })
+        return subscribeInfoLoading
+      }
+
+      function buildImportUrl(client, subscribeUrl) {
+        var title = encodeURIComponent((window.settings && window.settings.title) || document.title || 'BunCloud')
+        var encodedUrl = encodeURIComponent(subscribeUrl || '')
+        if (client === 'nekobox') return 'nekobox://import?url=' + encodedUrl + '&name=' + title
+        if (client === 'v2rayng') return 'v2rayng://install-config?url=' + encodedUrl
+        return ''
+      }
+
+      function openSubscribeClient(client) {
+        getUserSubscribeInfo().then(function (info) {
+          var subscribeUrl = info && info.subscribe_url ? info.subscribe_url : ''
+          var importUrl = buildImportUrl(client, subscribeUrl)
+          if (importUrl) window.location.href = importUrl
+        })
+      }
+
+      function createSubscribeImportItem(label, client, badge) {
+        var item = document.createElement('li')
+        item.className = 'n-list-item p-0!'
+        item.dataset.bcSubscribeImport = client
+        item.innerHTML = '<div class="n-list-item__main">' +
+          '<div class="flex cursor-pointer items-center p-2.5">' +
+          '<div class="w-16 flex justify-center"><span class="bc-subscribe-client-badge">' + escapeHtml(badge || label.charAt(0)) + '</span></div>' +
+          '<div class="text-gray-500">导入到 ' + escapeHtml(label) + '</div>' +
+          '</div>' +
+          '</div><div class="n-list-item__divider"></div>'
+        item.addEventListener('click', function () {
+          openSubscribeClient(client)
+        })
+        return item
+      }
+
+      function patchSubscribeModal() {
+        var lists = Array.prototype.slice.call(document.querySelectorAll('.n-modal .n-list, [role="dialog"] .n-list'))
+        lists.forEach(function (list) {
+          var text = textOf(list)
+          if (text.indexOf('复制订阅地址') === -1 || text.indexOf('ClashVergeRev') === -1) return
+          if (!list.querySelector('[data-bc-subscribe-import="nekobox"]')) {
+            var hiddify = Array.prototype.slice.call(list.querySelectorAll('.n-list-item')).find(function (item) {
+              return textOf(item).indexOf('Hiddify') !== -1
+            })
+            var next = hiddify && hiddify.nextSibling ? hiddify.nextSibling : null
+            list.insertBefore(createSubscribeImportItem('NekoBox', 'nekobox', 'N'), next)
+          }
+          if (!list.querySelector('[data-bc-subscribe-import="v2rayng"]')) {
+            var neko = list.querySelector('[data-bc-subscribe-import="nekobox"]')
+            var insertAfter = neko && neko.nextSibling ? neko.nextSibling : null
+            list.insertBefore(createSubscribeImportItem('v2rayNG', 'v2rayng', 'V'), insertAfter)
+          }
+        })
       }
 
       function escapeHtml(value) {
@@ -941,15 +1033,21 @@
         })
       }
 
-      var observer = new MutationObserver(schedulePatch)
+      function handleMutation() {
+        schedulePatch()
+        patchSubscribeModal()
+      }
+
+      var observer = new MutationObserver(handleMutation)
       observer.observe(document.documentElement, { childList: true, subtree: true })
       window.addEventListener('hashchange', handleRouteChange)
-      window.addEventListener('resize', schedulePatch)
-      window.addEventListener('load', schedulePatch)
-      setTimeout(schedulePatch, 800)
-      setTimeout(schedulePatch, 2000)
+      window.addEventListener('resize', handleMutation)
+      window.addEventListener('load', handleMutation)
+      setTimeout(handleMutation, 800)
+      setTimeout(handleMutation, 2000)
       setInterval(function () {
         if (!isTrafficRoute()) removeNodeTrafficInlineControls()
+        patchSubscribeModal()
       }, 300)
     })()
   </script>
