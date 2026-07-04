@@ -512,8 +512,10 @@ class MachineController extends Controller
         } else {
             $params['api_token'] = Str::random(32);
             $params['ddns_api_token'] = $this->encryptMachineDdnsApiToken($incomingDdnsApiToken);
-            Machine::create($params);
+            $machine = Machine::create($params);
         }
+
+        $this->probeCache()->forget($machine->probeAuthCacheKey());
 
         return response([
             'data' => true
