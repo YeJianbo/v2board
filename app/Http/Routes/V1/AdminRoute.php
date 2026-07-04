@@ -42,6 +42,8 @@ class AdminRoute
             $router->post('/server/route/drop', 'V1\\Admin\\Server\\RouteController@drop');
             $router->get ('/server/manage/getNodes', 'V1\\Admin\\Server\\ManageController@getNodes');
             $router->post('/server/manage/sort', 'V1\\Admin\\Server\\ManageController@sort');
+            $router->post('/server/manage/testConnectivity', 'V1\\Admin\\Server\\ManageController@testConnectivity');
+            $router->get ('/server/manage/connectivityTestResult', 'V1\\Admin\\Server\\ManageController@connectivityTestResult');
             $router->group([
                 'prefix' => 'server/trojan'
             ], function ($router) {

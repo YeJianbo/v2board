@@ -7,7 +7,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\DB;
+use App\Services\StatisticalService;
 
 class StatServerJob implements ShouldQueue
 {
@@ -53,56 +53,19 @@ class StatServerJob implements ShouldQueue
             return;
         }
 
-        $attempt = 0;
-        $maxAttempts = 3;
-
-        while ($attempt < $maxAttempts) {
-            try {
-                DB::beginTransaction();
-
-                $u = 0;
-                $d = 0;
-                foreach ($this->data as $trafficData) {
-                    $u += (int) ($trafficData[0] ?? 0);
-                    $d += (int) ($trafficData[1] ?? 0);
-                }
-
-                if ($u > 0 || $d > 0) {
-                    $now = time();
-                    DB::statement(
-                        "INSERT INTO v2_stat_server
-                            (server_id, server_type, u, d, record_type, record_at, created_at, updated_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                         ON DUPLICATE KEY UPDATE
-                            u = u + VALUES(u),
-                            d = d + VALUES(d),
-                            updated_at = VALUES(updated_at)",
-                        [
-                            $serverId,
-                            $serverType,
-                            $u,
-                            $d,
-                            $this->recordType,
-                            $recordAt,
-                            $now,
-                            $now,
-                        ]
-                    );
-                }
-
-                DB::commit();
-                return;
-            } catch (\Exception $e) {
-                DB::rollback();
-                if (strpos($e->getMessage(), '40001') !== false || strpos(strtolower($e->getMessage()), 'deadlock') !== false) {
-                    $attempt++;
-                    if ($attempt < $maxAttempts) {
-                        sleep(pow(2, $attempt));
-                        continue;
-                    }
-                }
-                throw new \RuntimeException('节点统计数据失败' . $e->getMessage(), 0, $e);
-            }
+        $u = 0;
+        $d = 0;
+        foreach ($this->data as $trafficData) {
+            $u += (int) ($trafficData[0] ?? 0);
+            $d += (int) ($trafficData[1] ?? 0);
         }
+
+        if ($u <= 0 && $d <= 0) {
+            return;
+        }
+
+        $service = app(StatisticalService::class);
+        $service->setStartAt($recordAt);
+        $service->statServer($serverId, $serverType, $u, $d);
     }
 }

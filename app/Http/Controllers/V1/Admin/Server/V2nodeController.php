@@ -202,6 +202,26 @@ class V2nodeController extends Controller
         if (array_key_exists('relay_machine_id', $params)) {
             $params['relay_machine_id'] = !empty($params['relay_machine_id']) ? (int) $params['relay_machine_id'] : null;
         }
+        if (!empty($params['parent_id'])) {
+            $parentServer = ServerV2node::find((int) $params['parent_id']);
+            if (!$parentServer) {
+                abort(422, '父节点不存在');
+            }
+
+            $parentMachineId = (int) ($parentServer->machine_id ?: 0);
+            if ($parentMachineId <= 0) {
+                abort(422, '父节点未绑定在线机器，无法创建中转子节点');
+            }
+
+            if (empty($params['relay_machine_id'])) {
+                abort(422, '子节点必须选择中转服务器');
+            }
+
+            $params['machine_id'] = $parentMachineId;
+            if ((int) $params['relay_machine_id'] === $parentMachineId) {
+                abort(422, '中转服务器不能与父节点落地机相同');
+            }
+        }
         $inputMachineId = array_key_exists('machine_id', $params) ? (int) ($params['machine_id'] ?: 0) : 0;
         if (
             !empty($params['relay_machine_id']) &&
@@ -311,6 +331,29 @@ class V2nodeController extends Controller
         if (array_key_exists('relay_machine_id', $params)) {
             $params['relay_machine_id'] = !empty($params['relay_machine_id']) ? (int) $params['relay_machine_id'] : null;
         }
+        if ((int) ($server->parent_id ?: 0) > 0) {
+            $parentServer = ServerV2node::find((int) $server->parent_id);
+            if (!$parentServer) {
+                abort(422, '父节点不存在');
+            }
+
+            $parentMachineId = (int) ($parentServer->machine_id ?: 0);
+            if ($parentMachineId <= 0) {
+                abort(422, '父节点未绑定在线机器，无法更新中转子节点');
+            }
+
+            if (empty($params['relay_machine_id']) && empty($server->relay_machine_id)) {
+                abort(422, '子节点必须选择中转服务器');
+            }
+
+            $params['machine_id'] = $parentMachineId;
+            $nextRelayMachineId = !empty($params['relay_machine_id'])
+                ? (int) $params['relay_machine_id']
+                : (int) ($server->relay_machine_id ?: 0);
+            if ($nextRelayMachineId === $parentMachineId) {
+                abort(422, '中转服务器不能与父节点落地机相同');
+            }
+        }
         $nextMachineId = array_key_exists('machine_id', $params)
             ? (int) ($params['machine_id'] ?: 0)
             : $originalMachineId;
@@ -339,11 +382,19 @@ class V2nodeController extends Controller
     public function copy(Request $request)
     {
         $server = ServerV2node::find($request->input('id'));
-        $server->show = 0;
         if (!$server) {
             abort(500, '服务器不存在');
         }
-        $copiedServer = ServerV2node::create($server->toArray());
+
+        $payload = $server->toArray();
+        unset($payload['id']);
+        $payload['show'] = 0;
+        // 复制节点配置时，不要继承原来的探针挂载信息。
+        // 否则副本会立刻下发到同一台机器上，用相同端口启动，导致冲突。
+        $payload['machine_id'] = null;
+        $payload['relay_machine_id'] = null;
+
+        $copiedServer = ServerV2node::create($payload);
         if (!$copiedServer) {
             abort(500, '复制失败');
         }

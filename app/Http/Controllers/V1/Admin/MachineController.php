@@ -19,6 +19,16 @@ class MachineController extends Controller
     private const INSTALL_TOKEN_MAX_USES = 100;
     private const ONLINE_WINDOW_SECONDS = 180;
     private const RESTART_TOKEN_TTL_SECONDS = 300;
+    private const PROBE_AUTO_UPDATE_INTERVAL_SECONDS = 86400;
+
+    private function probeCache()
+    {
+        try {
+            return Cache::store('redis');
+        } catch (\Throwable $e) {
+            return Cache::store(config('cache.default', 'file'));
+        }
+    }
 
     private function normalizeRelayRules($relayRules): array
     {
@@ -95,11 +105,170 @@ class MachineController extends Controller
         return $normalizedRules;
     }
 
+    private function resolveMachineConnectHost(Machine $machine): string
+    {
+        $status = $this->decodeStatus($machine->status, $machine) ?: [];
+
+        foreach (['primary_ip', 'public_ipv4', 'remote_ip', 'ip'] as $key) {
+            $value = trim((string) ($status[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return trim((string) $machine->host);
+    }
+
+    private function resolveV2nodeRelayProtocols(ServerV2node $server): array
+    {
+        $protocol = strtolower(trim((string) $server->protocol));
+        $network = strtolower(trim((string) $server->network));
+
+        if (in_array($protocol, ['hysteria2', 'tuic'], true)) {
+            return ['udp'];
+        }
+
+        if ($protocol === 'shadowsocks') {
+            $networkSettings = is_array($server->network_settings) ? $server->network_settings : [];
+            $hasHttpObfs = !empty($networkSettings['path']) || !empty($networkSettings['host']);
+            return $hasHttpObfs ? ['tcp'] : ['tcp', 'udp'];
+        }
+
+        if (in_array($network, ['udp', 'quic', 'kcp', 'mkcp'], true)) {
+            return ['udp'];
+        }
+
+        return ['tcp'];
+    }
+
+    private function buildGeneratedRelayRules(Machine $machine): array
+    {
+        $servers = ServerV2node::query()
+            ->where('relay_machine_id', $machine->id)
+            ->where('machine_id', '!=', $machine->id)
+            ->orderBy('sort', 'ASC')
+            ->orderBy('id', 'ASC')
+            ->get();
+
+        if ($servers->isEmpty()) {
+            return [];
+        }
+
+        $parentServers = ServerV2node::query()
+            ->whereIn('id', $servers->pluck('parent_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all())
+            ->get()
+            ->keyBy('id');
+        $manualOverrideMap = $this->buildRelayRuleOverrideMap(is_array($machine->relay_rules) ? $machine->relay_rules : []);
+
+        return $servers->map(function (ServerV2node $server) use ($parentServers, $manualOverrideMap) {
+            $listenHost = '0.0.0.0';
+
+            $listenPort = (int) $server->port;
+            if ($listenPort < 1 || $listenPort > 65535) {
+                $listenPort = (int) $server->server_port;
+            }
+
+            $targetPort = (int) $server->server_port;
+            if ($listenPort < 1 || $listenPort > 65535 || $targetPort < 1 || $targetPort > 65535) {
+                return null;
+            }
+
+            $targetHost = $this->resolveRelayTargetHostFromServer($server, $parentServers);
+            if ($targetHost === '') {
+                return null;
+            }
+
+            $protocols = $this->filterAutoRelayProtocolsByManualOverrides(
+                $listenHost,
+                $listenPort,
+                $this->resolveV2nodeRelayProtocols($server),
+                $manualOverrideMap
+            );
+            if (!$protocols) {
+                return null;
+            }
+
+            return [
+                'id' => 'generated-v2node-' . $server->id,
+                'source' => 'v2node',
+                'source_node_id' => (int) $server->id,
+                'source_node_name' => (string) $server->name,
+                'listen_host' => $listenHost,
+                'listen_port' => $listenPort,
+                'target_host' => $targetHost,
+                'target_port' => $targetPort,
+                'protocols' => $protocols,
+                'remark' => trim((string) $server->name) ?: ('v2node-' . $server->id),
+                'readonly' => 1,
+            ];
+        })->filter()->values()->all();
+    }
+
+    private function resolveRelayTargetHostFromServer(ServerV2node $server, $parentServers): string
+    {
+        $parentId = (int) ($server->parent_id ?: 0);
+        if ($parentId > 0) {
+            $parentServer = $parentServers->get($parentId);
+            $parentHost = trim((string) ($parentServer->host ?? ''));
+            if ($parentHost !== '') {
+                return $parentHost;
+            }
+        }
+
+        return trim((string) ($server->host ?? ''));
+    }
+
+    private function buildRelayRuleOverrideMap(array $rules): array
+    {
+        $map = [];
+
+        foreach ($rules as $rule) {
+            if (!is_array($rule)) {
+                continue;
+            }
+
+            $listenHost = trim((string) ($rule['listen_host'] ?? '0.0.0.0'));
+            if ($listenHost === '') {
+                $listenHost = '0.0.0.0';
+            }
+            $listenPort = (int) ($rule['listen_port'] ?? 0);
+            if ($listenPort < 1 || $listenPort > 65535) {
+                continue;
+            }
+
+            $key = strtolower($listenHost) . ':' . $listenPort;
+            if (!isset($map[$key])) {
+                $map[$key] = [];
+            }
+
+            foreach ((array) ($rule['protocols'] ?? []) as $protocol) {
+                $normalizedProtocol = strtolower(trim((string) $protocol));
+                if (in_array($normalizedProtocol, ['tcp', 'udp'], true)) {
+                    $map[$key][$normalizedProtocol] = true;
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    private function filterAutoRelayProtocolsByManualOverrides(string $listenHost, int $listenPort, array $protocols, array $overrideMap): array
+    {
+        $key = strtolower(trim($listenHost) !== '' ? trim($listenHost) : '0.0.0.0') . ':' . $listenPort;
+        $overridden = $overrideMap[$key] ?? [];
+
+        return array_values(array_filter(array_map(function ($protocol) {
+            return strtolower(trim((string) $protocol));
+        }, $protocols), function ($protocol) use ($overridden) {
+            return $protocol !== '' && !isset($overridden[$protocol]);
+        }));
+    }
+
     public function fetch(Request $request)
     {
         return response([
             'data' => Machine::orderBy('id', 'DESC')->get()->map(function (Machine $machine) {
-                $status = $this->decodeStatus($machine->status);
+                $status = $this->decodeStatus($machine->status, $machine);
                 $lastSeenAt = $this->resolveLastSeenAt($machine, $status);
                 $isOnline = $lastSeenAt > 0 && (time() - $lastSeenAt) < self::ONLINE_WINDOW_SECONDS;
                 $reportedIp = $this->resolveReportedIp($status);
@@ -137,6 +306,8 @@ class MachineController extends Controller
                     'ddns_last_synced_at' => $ddnsLastSyncedAt,
                     'ddns_error' => $ddnsError,
                     'relay_rules' => $machine->relay_rules ?: [],
+                    'relay_rules_generated' => $this->buildGeneratedRelayRules($machine),
+                    'probe_auto_update' => (int) ($machine->probe_auto_update ? 1 : 0),
                     'is_online' => $isOnline ? 1 : 0,
                     'last_seen_at' => $lastSeenAt,
                     'created_at' => $machine->created_at,
@@ -146,8 +317,22 @@ class MachineController extends Controller
         ]);
     }
 
-    private function decodeStatus($rawStatus): ?array
+    private function decodeStatus($rawStatus, ?Machine $machine = null): ?array
     {
+        if ($machine) {
+            $cached = $this->probeCache()->get($machine->statusCacheKey());
+            if (is_array($cached)) {
+                return $cached;
+            }
+
+            if (is_string($cached) && $cached !== '') {
+                $decodedCached = json_decode($cached, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decodedCached)) {
+                    return $decodedCached;
+                }
+            }
+        }
+
         if (empty($rawStatus)) {
             return null;
         }
@@ -243,7 +428,7 @@ class MachineController extends Controller
         NodeSyncService::notifyMachineNodesChanged($machineId);
 
         if ($queueRestart) {
-            Cache::put(
+            $this->probeCache()->put(
                 'v2node_probe_restart:' . $machineId,
                 (string) time() . '-' . Str::random(12),
                 self::RESTART_TOKEN_TTL_SECONDS
@@ -275,6 +460,7 @@ class MachineController extends Controller
             'ddns_proxied' => 'nullable|boolean',
             'ddns_api_token' => 'nullable|string|max:4096',
             'relay_rules' => 'nullable|array',
+            'probe_auto_update' => 'nullable|boolean',
         ]);
 
         $params['host'] = trim((string) ($params['host'] ?? ''));
@@ -286,6 +472,7 @@ class MachineController extends Controller
         $params['ddns_ttl'] = (int) ($params['ddns_ttl'] ?? 120);
         $params['ddns_proxied'] = (int) ($request->boolean('ddns_proxied'));
         $params['relay_rules'] = $this->normalizeRelayRules($request->input('relay_rules', []));
+        $params['probe_auto_update'] = (int) ($request->boolean('probe_auto_update'));
         $incomingDdnsApiToken = trim((string) ($params['ddns_api_token'] ?? ''));
         unset($params['ddns_api_token']);
 
@@ -318,7 +505,7 @@ class MachineController extends Controller
     public function installToken(Request $request)
     {
         $token = Str::random(48);
-        Cache::put('v2node_probe_enroll:' . hash('sha256', $token), [
+        $this->probeCache()->put('v2node_probe_enroll:' . hash('sha256', $token), [
             'uses' => 0,
             'max_uses' => self::INSTALL_TOKEN_MAX_USES,
             'created_at' => time(),
@@ -454,7 +641,7 @@ class MachineController extends Controller
         $machine = Machine::findOrFail($params['id']);
         $restartToken = (string) time() . '-' . Str::random(12);
 
-        Cache::put(
+        $this->probeCache()->put(
             'v2node_probe_restart:' . $machine->id,
             $restartToken,
             300
@@ -475,7 +662,7 @@ class MachineController extends Controller
         ]);
 
         $machine = Machine::findOrFail($params['id']);
-        $status = $this->decodeStatus($machine->status) ?: [];
+        $status = $this->decodeStatus($machine->status, $machine) ?: [];
         $virtualization = strtolower(trim((string) ($status['virtualization'] ?? '')));
         if ($virtualization !== 'kvm') {
             abort(422, 'BBR 仅对 KVM 虚拟化机器开放');
@@ -483,7 +670,7 @@ class MachineController extends Controller
 
         $enableToken = (string) time() . '-' . Str::random(12);
 
-        Cache::put(
+        $this->probeCache()->put(
             'v2node_probe_enable_bbr:' . $machine->id,
             $enableToken,
             300

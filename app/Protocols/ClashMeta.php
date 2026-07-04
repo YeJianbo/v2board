@@ -7,6 +7,94 @@ use Symfony\Component\Yaml\Yaml;
 
 class ClashMeta
 {
+    private const HEALTHCHECK_URL = 'http://cp.cloudflare.com/generate_204';
+    private const GLOBAL_AUTO_NAME = '♻️ 自动选择';
+    private const REGION_UNKNOWN = 'OTHER';
+    private const REGION_META = [
+        'CN' => ['flag' => '🇨🇳', 'label' => '中国'],
+        'HK' => ['flag' => '🇭🇰', 'label' => '香港'],
+        'MO' => ['flag' => '🇲🇴', 'label' => '澳门'],
+        'TW' => ['flag' => '🇹🇼', 'label' => '台湾'],
+        'JP' => ['flag' => '🇯🇵', 'label' => '日本'],
+        'KR' => ['flag' => '🇰🇷', 'label' => '韩国'],
+        'SG' => ['flag' => '🇸🇬', 'label' => '新加坡'],
+        'MY' => ['flag' => '🇲🇾', 'label' => '马来西亚'],
+        'TH' => ['flag' => '🇹🇭', 'label' => '泰国'],
+        'PH' => ['flag' => '🇵🇭', 'label' => '菲律宾'],
+        'US' => ['flag' => '🇺🇸', 'label' => '美国'],
+        'CA' => ['flag' => '🇨🇦', 'label' => '加拿大'],
+        'GB' => ['flag' => '🇬🇧', 'label' => '英国'],
+        'DE' => ['flag' => '🇩🇪', 'label' => '德国'],
+        'FR' => ['flag' => '🇫🇷', 'label' => '法国'],
+        'NL' => ['flag' => '🇳🇱', 'label' => '荷兰'],
+        'AU' => ['flag' => '🇦🇺', 'label' => '澳大利亚'],
+        self::REGION_UNKNOWN => ['flag' => '🌐', 'label' => '其他地区'],
+    ];
+    private const REGION_TOKEN_MAP = [
+        '中国' => 'CN',
+        '大陆' => 'CN',
+        '内地' => 'CN',
+        '香港' => 'HK',
+        'hk' => 'HK',
+        'hong kong' => 'HK',
+        'hongkong' => 'HK',
+        '澳门' => 'MO',
+        'macao' => 'MO',
+        'macau' => 'MO',
+        '台湾' => 'TW',
+        'tw' => 'TW',
+        'taiwan' => 'TW',
+        '日本' => 'JP',
+        'jp' => 'JP',
+        'japan' => 'JP',
+        '韩国' => 'KR',
+        'kr' => 'KR',
+        'korea' => 'KR',
+        '新加坡' => 'SG',
+        'sg' => 'SG',
+        'singapore' => 'SG',
+        '马来西亚' => 'MY',
+        '大马' => 'MY',
+        'my' => 'MY',
+        'malaysia' => 'MY',
+        '泰国' => 'TH',
+        'th' => 'TH',
+        'thailand' => 'TH',
+        '菲律宾' => 'PH',
+        'ph' => 'PH',
+        'philippines' => 'PH',
+        '美国' => 'US',
+        '美國' => 'US',
+        'us' => 'US',
+        'usa' => 'US',
+        'america' => 'US',
+        'united states' => 'US',
+        '加拿大' => 'CA',
+        'ca' => 'CA',
+        'canada' => 'CA',
+        '英国' => 'GB',
+        '英國' => 'GB',
+        'uk' => 'GB',
+        'gb' => 'GB',
+        'britain' => 'GB',
+        'united kingdom' => 'GB',
+        '德国' => 'DE',
+        '德國' => 'DE',
+        'de' => 'DE',
+        'germany' => 'DE',
+        '法国' => 'FR',
+        '法國' => 'FR',
+        'fr' => 'FR',
+        'france' => 'FR',
+        '荷兰' => 'NL',
+        '荷蘭' => 'NL',
+        'nl' => 'NL',
+        'netherlands' => 'NL',
+        '澳大利亚' => 'AU',
+        '澳洲' => 'AU',
+        'au' => 'AU',
+        'australia' => 'AU',
+    ];
     public $flag = 'meta';
     private $servers;
     private $user;
@@ -40,48 +128,70 @@ class ClashMeta
         }
         $proxy = [];
         $proxies = [];
+        $regionProxyMap = [];
 
         foreach ($servers as $item) {
             // Singbox-style inline adaptation: unwrap v2node
             if (($item['type'] ?? null) === 'v2node' && isset($item['protocol'])) {
                 $item['type'] = $item['protocol'];
             }
+            $handled = false;
             switch ($item['type']) {
                 case 'shadowsocks':
                     $proxy[] = self::buildShadowsocks($user['uuid'], $item);
                     $proxies[] = $item['name'];
+                    $handled = true;
                     break;
                 case 'vmess':
                     $proxy[] = self::buildVmess($user['uuid'], $item);
                     $proxies[] = $item['name'];
+                    $handled = true;
                     break;
                 case 'vless':
                     $proxy[] = self::buildVless($user['uuid'], $item);
                     $proxies[] = $item['name'];
+                    $handled = true;
                     break;
                 case 'trojan':
                     $proxy[] = self::buildTrojan($user['uuid'], $item);
                     $proxies[] = $item['name'];
+                    $handled = true;
                     break;
                 case 'tuic':
                     $proxy[] = self::buildTuic($user['uuid'], $item);
                     $proxies[] = $item['name'];
+                    $handled = true;
                     break;
                 case 'anytls':
                     $proxy[] = self::buildAnyTLS($user['uuid'], $item);
                     $proxies[] = $item['name'];
+                    $handled = true;
                     break;
                 case 'hysteria':
                     $proxy[] = self::buildHysteria($user['uuid'], $item);
                     $proxies[] = $item['name'];
+                    $handled = true;
                     break;
                 case 'hysteria2':
                     $proxy[] = $this->buildHysteria2($user['uuid'], $item);
                     $proxies[] = $item['name'];
+                    $handled = true;
                     break;
+            }
+
+            if ($handled && !empty($item['name'])) {
+                $regionCode = $this->inferRegionCode($item);
+                if (!isset($regionProxyMap[$regionCode])) {
+                    $regionProxyMap[$regionCode] = [];
+                }
+                $regionProxyMap[$regionCode][] = $item['name'];
             }
         }
 
+        $config['proxy-groups'] = $this->injectDynamicRegionGroups(
+            $config['proxy-groups'] ?? [],
+            $regionProxyMap
+        );
         $config['proxies'] = array_merge($config['proxies'] ? $config['proxies'] : [], $proxy);
         foreach ($config['proxy-groups'] as $k => $v) {
             if (!is_array($config['proxy-groups'][$k]['proxies'])) $config['proxy-groups'][$k]['proxies'] = [];
@@ -98,11 +208,18 @@ class ClashMeta
                 if ($isFilter) continue;
             }
             if ($isFilter) continue;
+            if (!empty($config['proxy-groups'][$k]['__skip_auto_fill'])) continue;
             $config['proxy-groups'][$k]['proxies'] = array_merge($config['proxy-groups'][$k]['proxies'], $proxies);
         }
         $config['proxy-groups'] = array_filter($config['proxy-groups'], function($group) {
+            unset($group['__skip_auto_fill']);
             return $group['proxies'];
         });
+        foreach ($config['proxy-groups'] as &$group) {
+            unset($group['__skip_auto_fill']);
+            $group['proxies'] = array_values(array_unique($group['proxies']));
+        }
+        unset($group);
         $config['proxy-groups'] = array_values($config['proxy-groups']);
         // Force the current subscription domain to be a direct rule
         //$subsDomain = $_SERVER['HTTP_HOST'];
@@ -512,5 +629,165 @@ class ClashMeta
     private function isRegex($exp)
     {
         return @preg_match($exp, '') !== false;
+    }
+
+    private function injectDynamicRegionGroups(array $groups, array $regionProxyMap): array
+    {
+        $builtGroups = $this->buildRegionGroups($regionProxyMap);
+        if (empty($builtGroups['groups'])) {
+            return $groups;
+        }
+        return array_merge($groups, $builtGroups['groups']);
+    }
+
+    private function buildRegionGroups(array $regionProxyMap): array
+    {
+        if (empty($regionProxyMap)) {
+            return ['groups' => [], 'selectorNames' => []];
+        }
+
+        $groups = [];
+        foreach ($this->sortRegionProxyMap($regionProxyMap) as $regionCode => $proxyNames) {
+            $proxyNames = array_values(array_unique(array_filter($proxyNames)));
+            if (empty($proxyNames)) {
+                continue;
+            }
+
+            $regionMeta = self::REGION_META[$regionCode] ?? self::REGION_META[self::REGION_UNKNOWN];
+            $regionLabel = $regionMeta['label'];
+            $regionSelectorName = '📍 地区-' . $regionMeta['flag'] . ' ' . $regionLabel;
+            $autoGroupName = '♻️ 地区自动-' . $regionLabel;
+            $fallbackGroupName = '🔯 地区故障转移-' . $regionLabel;
+
+            $groups[] = [
+                'name' => $autoGroupName,
+                'type' => 'url-test',
+                'proxies' => $proxyNames,
+                'url' => self::HEALTHCHECK_URL,
+                'interval' => 300,
+                '__skip_auto_fill' => true,
+            ];
+            $groups[] = [
+                'name' => $fallbackGroupName,
+                'type' => 'fallback',
+                'proxies' => $proxyNames,
+                'url' => self::HEALTHCHECK_URL,
+                'interval' => 300,
+                '__skip_auto_fill' => true,
+            ];
+            $groups[] = [
+                'name' => $regionSelectorName,
+                'type' => 'select',
+                'proxies' => array_merge([$autoGroupName, $fallbackGroupName], $proxyNames),
+                '__skip_auto_fill' => true,
+            ];
+        }
+
+        return ['groups' => $groups, 'selectorNames' => []];
+    }
+
+    private function sortRegionProxyMap(array $regionProxyMap): array
+    {
+        $orderedCodes = array_keys(self::REGION_META);
+        $sorted = [];
+
+        foreach ($orderedCodes as $regionCode) {
+            if (isset($regionProxyMap[$regionCode])) {
+                $sorted[$regionCode] = $regionProxyMap[$regionCode];
+            }
+        }
+
+        foreach ($regionProxyMap as $regionCode => $proxyNames) {
+            if (!isset($sorted[$regionCode])) {
+                $sorted[$regionCode] = $proxyNames;
+            }
+        }
+
+        return $sorted;
+    }
+
+    private function inferRegionCode(array $server): string
+    {
+        $sources = [
+            $server['country_code'] ?? null,
+            $server['countryCode'] ?? null,
+            $server['country'] ?? null,
+            $server['country_name'] ?? null,
+            $server['region'] ?? null,
+            $server['area'] ?? null,
+            $server['location'] ?? null,
+            $server['name'] ?? null,
+            $server['host'] ?? null,
+        ];
+
+        foreach ($sources as $source) {
+            $regionCode = $this->inferRegionCodeFromSource($source);
+            if ($regionCode !== null) {
+                return $regionCode;
+            }
+        }
+
+        return self::REGION_UNKNOWN;
+    }
+
+    private function inferRegionCodeFromSource($source): ?string
+    {
+        $value = trim((string) $source);
+        if ($value === '') {
+            return null;
+        }
+
+        $upperValue = strtoupper($value);
+        if (isset(self::REGION_META[$upperValue])) {
+            return $upperValue;
+        }
+        if ($upperValue === 'UK') {
+            return 'GB';
+        }
+
+        $flagMap = [
+            '🇨🇳' => 'CN',
+            '🇭🇰' => 'HK',
+            '🇲🇴' => 'MO',
+            '🇹🇼' => 'TW',
+            '🇯🇵' => 'JP',
+            '🇰🇷' => 'KR',
+            '🇸🇬' => 'SG',
+            '🇲🇾' => 'MY',
+            '🇹🇭' => 'TH',
+            '🇵🇭' => 'PH',
+            '🇺🇸' => 'US',
+            '🇨🇦' => 'CA',
+            '🇬🇧' => 'GB',
+            '🇩🇪' => 'DE',
+            '🇫🇷' => 'FR',
+            '🇳🇱' => 'NL',
+            '🇦🇺' => 'AU',
+        ];
+
+        foreach ($flagMap as $flag => $regionCode) {
+            if (mb_strpos($value, $flag) !== false) {
+                return $regionCode;
+            }
+        }
+
+        $normalizedValue = mb_strtolower($value);
+        foreach (self::REGION_TOKEN_MAP as $token => $regionCode) {
+            if (mb_strpos($normalizedValue, mb_strtolower($token)) !== false) {
+                return $regionCode;
+            }
+        }
+
+        if (preg_match('/\b([A-Za-z]{2})\b/u', $value, $matches)) {
+            $token = strtoupper($matches[1]);
+            if ($token === 'UK') {
+                return 'GB';
+            }
+            if (isset(self::REGION_META[$token])) {
+                return $token;
+            }
+        }
+
+        return null;
     }
 }

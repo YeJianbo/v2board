@@ -13,15 +13,28 @@ use App\Models\ServerTuic;
 use App\Models\ServerV2node;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
 class MachineController extends Controller
 {
+    private const PROBE_AUTO_UPDATE_INTERVAL_SECONDS = 86400;
+    private const PROBE_STATUS_PERSIST_INTERVAL_SECONDS = 30;
+
     private const SIGNATURE_WINDOW_SECONDS = 300;
     private const ENROLL_TOKEN_TTL_SECONDS = 604800;
     private const ENROLL_TOKEN_DEFAULT_MAX_USES = 100;
+
+    private function probeCache()
+    {
+        try {
+            return Cache::store('redis');
+        } catch (\Throwable $e) {
+            return Cache::store(config('cache.default', 'file'));
+        }
+    }
 
     private function panelSetting(string $key, $default = null)
     {
@@ -102,10 +115,9 @@ class MachineController extends Controller
         }
 
         $nonceCacheKey = 'v2node_probe_nonce:' . $machine->id . ':' . hash('sha256', $nonce);
-        if (Cache::has($nonceCacheKey)) {
+        if (!$this->probeCache()->add($nonceCacheKey, true, self::SIGNATURE_WINDOW_SECONDS)) {
             abort(401, 'Unauthorized: Replay detected');
         }
-        Cache::put($nonceCacheKey, true, self::SIGNATURE_WINDOW_SECONDS);
 
         return $machine;
     }
@@ -157,6 +169,18 @@ class MachineController extends Controller
 
     private function decodeMachineStatus(Machine $machine): array
     {
+        $cached = $this->probeCache()->get($machine->statusCacheKey());
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        if (is_string($cached) && $cached !== '') {
+            $decodedCached = json_decode($cached, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decodedCached)) {
+                return $decodedCached;
+            }
+        }
+
         if (empty($machine->status)) {
             return [];
         }
@@ -236,6 +260,7 @@ class MachineController extends Controller
     private function touchMachineHeartbeat(Machine $machine, Request $request, array $extraStatus = []): void
     {
         $status = $this->decodeMachineStatus($machine);
+        $previousStatus = $status;
         $previousReportedAt = (int) ($status['reported_at'] ?? 0);
         $now = time();
         $remoteIp = $this->resolveRequestRemoteIp($request);
@@ -291,8 +316,62 @@ class MachineController extends Controller
             }
         }
 
-        $machine->status = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $machine->save();
+        $status = $this->syncMachineDdns($machine, $status);
+        $this->probeCache()->put($machine->statusCacheKey(), $status, 86400 * 7);
+
+        $forcePersist = $previousReportedAt <= 0
+            || ($now - $previousReportedAt) >= self::PROBE_STATUS_PERSIST_INTERVAL_SECONDS
+            || $this->hasMachineStatusCriticalChanges($previousStatus, $status);
+
+        if (!$forcePersist) {
+            return;
+        }
+
+        $encodedStatus = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        Machine::query()
+            ->whereKey($machine->getKey())
+            ->update([
+                'status' => $encodedStatus,
+                'updated_at' => $now,
+            ]);
+        $machine->status = $encodedStatus;
+        $machine->updated_at = $now;
+    }
+
+    private function hasMachineStatusCriticalChanges(array $before, array $after): bool
+    {
+        $criticalKeys = [
+            'ip',
+            'remote_ip',
+            'primary_ip',
+            'country',
+            'country_code',
+            'version',
+            'v2node_status',
+            'gost_status',
+            'gost_version',
+            'listen_ports',
+            'ddns_host',
+            'ddns_synced_ip',
+            'ddns_synced_at',
+            'ddns_error',
+            'ddns_fingerprint',
+            'primary_ipv4',
+            'primary_ipv6',
+            'public_ipv4',
+            'public_ipv6',
+            'tcp_congestion_control',
+            'bbr_status',
+            'docker_summary',
+        ];
+
+        foreach ($criticalKeys as $key) {
+            if (($before[$key] ?? null) !== ($after[$key] ?? null)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function resolveGeoByIp(string $ip): array
@@ -302,7 +381,7 @@ class MachineController extends Controller
             return [];
         }
 
-        return Cache::remember('machine_geo:' . $ip, 86400, function () use ($ip) {
+        return $this->probeCache()->remember('machine_geo:' . $ip, 86400, function () use ($ip) {
             try {
                 $response = Http::timeout(3)
                     ->acceptJson()
@@ -357,9 +436,174 @@ class MachineController extends Controller
         }
 
         try {
-            return (string) decrypt($value);
+            return (string) Crypt::decryptString($value);
         } catch (\Throwable $e) {
             return preg_match('/^[A-Za-z0-9._-]{20,}$/', $value) ? $value : '';
+        }
+    }
+
+    private function resolveDdnsCurrentIp(Machine $machine, array $status): string
+    {
+        $recordType = strtoupper(trim((string) ($machine->ddns_record_type ?: 'A')));
+        $candidates = $recordType === 'AAAA'
+            ? [
+                $status['primary_ipv6'] ?? null,
+                $status['public_ipv6'] ?? null,
+                $status['ipv6'] ?? null,
+                $status['primary_ip'] ?? null,
+                $status['remote_ip'] ?? null,
+                $status['ip'] ?? null,
+            ]
+            : [
+                $status['primary_ipv4'] ?? null,
+                $status['public_ipv4'] ?? null,
+                $status['ipv4'] ?? null,
+                $status['primary_ip'] ?? null,
+                $status['remote_ip'] ?? null,
+                $status['ip'] ?? null,
+            ];
+
+        $filterFlag = $recordType === 'AAAA' ? FILTER_FLAG_IPV6 : FILTER_FLAG_IPV4;
+        foreach ($candidates as $candidate) {
+            $value = trim((string) $candidate);
+            if ($value !== '' && filter_var($value, FILTER_VALIDATE_IP, $filterFlag)) {
+                return $value;
+            }
+        }
+
+        return '';
+    }
+
+    private function buildDdnsSyncFingerprint(Machine $machine, string $host, string $currentIp): string
+    {
+        return implode('|', [
+            strtoupper(trim((string) ($machine->ddns_record_type ?: 'A'))),
+            trim((string) ($machine->ddns_provider ?: 'cloudflare')),
+            $host,
+            $currentIp,
+            (int) ($machine->ddns_ttl ?: 120),
+            (int) ($machine->ddns_proxied ? 1 : 0),
+        ]);
+    }
+
+    private function extractCloudflareError($payload, string $fallback): string
+    {
+        if (!is_array($payload)) {
+            return $fallback;
+        }
+
+        $errors = is_array($payload['errors'] ?? null) ? $payload['errors'] : [];
+        foreach ($errors as $error) {
+            $message = trim((string) ($error['message'] ?? ''));
+            if ($message !== '') {
+                return $message;
+            }
+        }
+
+        $messages = is_array($payload['messages'] ?? null) ? $payload['messages'] : [];
+        foreach ($messages as $messageItem) {
+            $message = trim((string) ($messageItem['message'] ?? $messageItem ?? ''));
+            if ($message !== '') {
+                return $message;
+            }
+        }
+
+        return $fallback;
+    }
+
+    private function syncMachineDdns(Machine $machine, array $status): array
+    {
+        $ddnsHost = $this->resolveDdnsHost($machine);
+        $status['ddns_host'] = $ddnsHost;
+
+        if (!(bool) $machine->ddns_enabled) {
+            $status['ddns_synced_ip'] = '';
+            $status['ddns_synced_at'] = 0;
+            $status['ddns_error'] = '';
+            $status['ddns_fingerprint'] = '';
+            return $status;
+        }
+
+        $provider = trim((string) ($machine->ddns_provider ?: 'cloudflare'));
+        $zoneName = trim((string) ($machine->ddns_zone_name ?: ''));
+        $recordName = trim((string) ($machine->ddns_record_name ?: ''));
+        $recordType = strtoupper(trim((string) ($machine->ddns_record_type ?: 'A')));
+        $apiToken = $this->decryptMachineDdnsApiToken($machine);
+        $currentIp = $this->resolveDdnsCurrentIp($machine, $status);
+        $fingerprint = $this->buildDdnsSyncFingerprint($machine, $ddnsHost, $currentIp);
+
+        if ($provider !== 'cloudflare') {
+            $status['ddns_error'] = "暂不支持 {$provider} DDNS";
+            return $status;
+        }
+
+        if ($zoneName === '' || $recordName === '' || $ddnsHost === '' || $apiToken === '' || $currentIp === '') {
+            $status['ddns_error'] = 'DDNS 配置不完整';
+            return $status;
+        }
+
+        if (
+            trim((string) ($status['ddns_synced_ip'] ?? '')) === $currentIp &&
+            trim((string) ($status['ddns_fingerprint'] ?? '')) === $fingerprint &&
+            trim((string) ($status['ddns_error'] ?? '')) === ''
+        ) {
+            return $status;
+        }
+
+        try {
+            $client = Http::baseUrl('https://api.cloudflare.com/client/v4')
+                ->timeout(8)
+                ->acceptJson()
+                ->withToken($apiToken);
+
+            $zoneResponse = $client->get('/zones', ['name' => $zoneName]);
+            $zonePayload = $zoneResponse->json();
+            if (!$zoneResponse->successful() || !is_array($zonePayload) || !($zonePayload['success'] ?? false)) {
+                $status['ddns_error'] = '获取 Cloudflare Zone 失败：' . $this->extractCloudflareError($zonePayload, 'unknown');
+                return $status;
+            }
+
+            $zoneId = trim((string) ($zonePayload['result'][0]['id'] ?? ''));
+            if ($zoneId === '') {
+                $status['ddns_error'] = '未找到 Cloudflare Zone';
+                return $status;
+            }
+
+            $recordResponse = $client->get("/zones/{$zoneId}/dns_records", [
+                'type' => $recordType,
+                'name' => $ddnsHost,
+            ]);
+            $recordPayload = $recordResponse->json();
+            if (!$recordResponse->successful() || !is_array($recordPayload) || !($recordPayload['success'] ?? false)) {
+                $status['ddns_error'] = '获取 Cloudflare 记录失败：' . $this->extractCloudflareError($recordPayload, 'unknown');
+                return $status;
+            }
+
+            $requestBody = [
+                'type' => $recordType,
+                'name' => $ddnsHost,
+                'content' => $currentIp,
+                'ttl' => (int) ($machine->ddns_ttl ?: 120),
+                'proxied' => (bool) $machine->ddns_proxied,
+            ];
+            $recordId = trim((string) ($recordPayload['result'][0]['id'] ?? ''));
+            $writeResponse = $recordId !== ''
+                ? $client->put("/zones/{$zoneId}/dns_records/{$recordId}", $requestBody)
+                : $client->post("/zones/{$zoneId}/dns_records", $requestBody);
+            $writePayload = $writeResponse->json();
+            if (!$writeResponse->successful() || !is_array($writePayload) || !($writePayload['success'] ?? false)) {
+                $status['ddns_error'] = '更新 Cloudflare 记录失败：' . $this->extractCloudflareError($writePayload, 'unknown');
+                return $status;
+            }
+
+            $status['ddns_synced_ip'] = $currentIp;
+            $status['ddns_synced_at'] = time();
+            $status['ddns_error'] = '';
+            $status['ddns_fingerprint'] = $fingerprint;
+            return $status;
+        } catch (\Throwable $e) {
+            $status['ddns_error'] = '更新 Cloudflare 记录失败：' . $e->getMessage();
+            return $status;
         }
     }
 
@@ -399,23 +643,14 @@ class MachineController extends Controller
             return [];
         }
 
-        $targetMachineIds = $servers->pluck('machine_id')
-            ->filter()
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-
-        $targetMachines = Machine::query()
-            ->whereIn('id', $targetMachineIds)
+        $parentServers = ServerV2node::query()
+            ->whereIn('id', $servers->pluck('parent_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all())
             ->get()
             ->keyBy('id');
+        $manualOverrideMap = $this->buildRelayRuleOverrideMap($this->buildMachineRelayRules($machine));
 
-        return $servers->map(function (ServerV2node $server) use ($targetMachines) {
-            $targetMachine = $targetMachines->get((int) $server->machine_id);
-            if (!$targetMachine) {
-                return null;
-            }
+        return $servers->map(function (ServerV2node $server) use ($parentServers, $manualOverrideMap) {
+            $listenHost = '0.0.0.0';
 
             $listenPort = (int) $server->port;
             if ($listenPort < 1 || $listenPort > 65535) {
@@ -426,8 +661,18 @@ class MachineController extends Controller
                 return null;
             }
 
-            $targetHost = $this->resolveMachineConnectHost($targetMachine);
+            $targetHost = $this->resolveRelayTargetHostFromServer($server, $parentServers);
             if ($targetHost === '') {
+                return null;
+            }
+
+            $protocols = $this->filterAutoRelayProtocolsByManualOverrides(
+                $listenHost,
+                $listenPort,
+                $this->resolveV2nodeFirewallProtocols($server),
+                $manualOverrideMap
+            );
+            if (!$protocols) {
                 return null;
             }
 
@@ -435,13 +680,69 @@ class MachineController extends Controller
                 'node_id' => (int) $server->id,
                 'name' => (string) $server->name,
                 'protocol' => strtolower(trim((string) $server->protocol)),
-                'listen_host' => '0.0.0.0',
+                'listen_host' => $listenHost,
                 'listen_port' => $listenPort,
                 'target_host' => $targetHost,
                 'target_port' => $targetPort,
-                'protocols' => $this->resolveV2nodeFirewallProtocols($server),
+                'protocols' => $protocols,
             ];
         })->filter()->values()->all();
+    }
+
+    private function resolveRelayTargetHostFromServer(ServerV2node $server, $parentServers): string
+    {
+        $parentId = (int) ($server->parent_id ?: 0);
+        if ($parentId > 0) {
+            $parentServer = $parentServers->get($parentId);
+            $parentHost = trim((string) ($parentServer->host ?? ''));
+            if ($parentHost !== '') {
+                return $parentHost;
+            }
+        }
+
+        return trim((string) ($server->host ?? ''));
+    }
+
+    private function buildRelayRuleOverrideMap(array $rules): array
+    {
+        $map = [];
+
+        foreach ($rules as $rule) {
+            $listenHost = trim((string) ($rule['listen_host'] ?? '0.0.0.0'));
+            if ($listenHost === '') {
+                $listenHost = '0.0.0.0';
+            }
+            $listenPort = (int) ($rule['listen_port'] ?? 0);
+            if ($listenPort < 1 || $listenPort > 65535) {
+                continue;
+            }
+
+            $key = strtolower($listenHost) . ':' . $listenPort;
+            if (!isset($map[$key])) {
+                $map[$key] = [];
+            }
+
+            foreach ((array) ($rule['protocols'] ?? []) as $protocol) {
+                $normalizedProtocol = strtolower(trim((string) $protocol));
+                if (in_array($normalizedProtocol, ['tcp', 'udp'], true)) {
+                    $map[$key][$normalizedProtocol] = true;
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    private function filterAutoRelayProtocolsByManualOverrides(string $listenHost, int $listenPort, array $protocols, array $overrideMap): array
+    {
+        $key = strtolower(trim($listenHost) !== '' ? trim($listenHost) : '0.0.0.0') . ':' . $listenPort;
+        $overridden = $overrideMap[$key] ?? [];
+
+        return array_values(array_filter(array_map(function ($protocol) {
+            return strtolower(trim((string) $protocol));
+        }, $protocols), function ($protocol) use ($overridden) {
+            return $protocol !== '' && !isset($overridden[$protocol]);
+        }));
     }
 
     private function buildMachineRelayRules(Machine $machine): array
@@ -671,7 +972,7 @@ class MachineController extends Controller
         ]);
 
         $cacheKey = 'v2node_probe_enroll:' . hash('sha256', (string) $params['enroll_token']);
-        $enrollMeta = Cache::get($cacheKey);
+        $enrollMeta = $this->probeCache()->get($cacheKey);
         if (!$enrollMeta) {
             abort(401, 'Unauthorized: Invalid enrollment token');
         }
@@ -689,12 +990,12 @@ class MachineController extends Controller
         $maxUses = max(1, (int) ($enrollMeta['max_uses'] ?? self::ENROLL_TOKEN_DEFAULT_MAX_USES));
         $expiresAt = (int) ($enrollMeta['expires_at'] ?? (time() + self::ENROLL_TOKEN_TTL_SECONDS));
         if ($expiresAt <= time()) {
-            Cache::forget($cacheKey);
+            $this->probeCache()->forget($cacheKey);
             abort(401, 'Unauthorized: Enrollment token expired');
         }
 
         if ($uses >= $maxUses) {
-            Cache::forget($cacheKey);
+            $this->probeCache()->forget($cacheKey);
             abort(401, 'Unauthorized: Enrollment token usage limit exceeded');
         }
 
@@ -724,12 +1025,12 @@ class MachineController extends Controller
 
         $uses++;
         if ($uses >= $maxUses) {
-            Cache::forget($cacheKey);
+            $this->probeCache()->forget($cacheKey);
         } else {
             $enrollMeta['uses'] = $uses;
             $enrollMeta['max_uses'] = $maxUses;
             $enrollMeta['expires_at'] = $expiresAt;
-            Cache::put($cacheKey, $enrollMeta, max(1, $expiresAt - time()));
+            $this->probeCache()->put($cacheKey, $enrollMeta, max(1, $expiresAt - time()));
         }
 
         return response()->json([
@@ -774,8 +1075,8 @@ class MachineController extends Controller
             })
             ->values();
 
-        $restartToken = Cache::get('v2node_probe_restart:' . $machine->id);
-        $enableBbrToken = Cache::get('v2node_probe_enable_bbr:' . $machine->id);
+        $restartToken = $this->probeCache()->get('v2node_probe_restart:' . $machine->id);
+        $enableBbrToken = $this->probeCache()->get('v2node_probe_enable_bbr:' . $machine->id);
         $ddnsHost = $this->resolveDdnsHost($machine);
         $currentIp = trim((string) ($status['primary_ip'] ?? $status['remote_ip'] ?? $status['ip'] ?? ''));
 
@@ -792,7 +1093,7 @@ class MachineController extends Controller
                     )),
                 ],
                 'ddns' => [
-                    'enabled' => (bool) $machine->ddns_enabled,
+                    'enabled' => false,
                     'provider' => (string) ($machine->ddns_provider ?: 'cloudflare'),
                     'zone_name' => (string) ($machine->ddns_zone_name ?: ''),
                     'record_name' => (string) ($machine->ddns_record_name ?: ''),
@@ -800,11 +1101,17 @@ class MachineController extends Controller
                     'record_type' => strtoupper((string) ($machine->ddns_record_type ?: 'A')),
                     'ttl' => (int) ($machine->ddns_ttl ?: 120),
                     'proxied' => (bool) $machine->ddns_proxied,
-                    'api_token' => $this->decryptMachineDdnsApiToken($machine),
-                    'current_ip' => $currentIp,
+                    'api_token' => '',
+                    'current_ip' => '',
                     'last_synced_ip' => trim((string) ($status['ddns_synced_ip'] ?? '')),
                     'last_synced_at' => !empty($status['ddns_synced_at']) ? (int) $status['ddns_synced_at'] : 0,
                 ],
+                'auto_update' => [
+                    'enabled' => (bool) $machine->probe_auto_update,
+                    'interval_seconds' => self::PROBE_AUTO_UPDATE_INTERVAL_SECONDS,
+                    'repo' => 'YeJianbo/v2node',
+                ],
+                'connectivity_test_task' => $this->buildProbeConnectivityTask($machine),
             ],
         ]);
     }
@@ -818,8 +1125,8 @@ class MachineController extends Controller
         ]);
 
         $cacheKey = 'v2node_probe_restart:' . $machine->id;
-        if (hash_equals((string) Cache::get($cacheKey, ''), (string) $params['restart_token'])) {
-            Cache::forget($cacheKey);
+        if (hash_equals((string) $this->probeCache()->get($cacheKey, ''), (string) $params['restart_token'])) {
+            $this->probeCache()->forget($cacheKey);
         }
 
         return response()->json([
@@ -838,8 +1145,8 @@ class MachineController extends Controller
         ]);
 
         $cacheKey = 'v2node_probe_enable_bbr:' . $machine->id;
-        if (hash_equals((string) Cache::get($cacheKey, ''), (string) $params['enable_bbr_token'])) {
-            Cache::forget($cacheKey);
+        if (hash_equals((string) $this->probeCache()->get($cacheKey, ''), (string) $params['enable_bbr_token'])) {
+            $this->probeCache()->forget($cacheKey);
         }
 
         $status = $this->decodeMachineStatus($machine);
@@ -857,11 +1164,82 @@ class MachineController extends Controller
             unset($status['bbr_action_error']);
         }
 
-        $machine->status = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $encodedStatus = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $machine->status = $encodedStatus;
         $machine->save();
+        $this->probeCache()->put($machine->statusCacheKey(), $status, 86400 * 7);
 
         return response()->json([
             'data' => 'success',
         ]);
+    }
+
+    public function connectivityTestAck(Request $request)
+    {
+        $machine = $this->authenticate($request);
+        $this->touchMachineHeartbeat($machine, $request);
+        $params = $request->validate([
+            'task_id' => 'required|string|max:64',
+            'status' => 'required|string|in:success,failed',
+            'message' => 'nullable|string|max:255',
+            'latency_ms' => 'nullable|integer|min:0|max:600000',
+            'http_code' => 'nullable|integer|min:0|max:999',
+            'logs' => 'nullable|string|max:4000',
+        ]);
+
+        $taskCacheKey = 'v2node_probe_connectivity_task:' . $machine->id;
+        $task = $this->probeCache()->get($taskCacheKey);
+        if (!$task || !is_array($task) || !hash_equals((string) ($task['task_id'] ?? ''), (string) $params['task_id'])) {
+            abort(404, 'Connectivity task not found');
+        }
+
+        $now = time();
+        $expiresAt = (int) ($task['expires_at'] ?? ($now + 300));
+        $ttl = max(60, $expiresAt - $now);
+        $result = [
+            'task_id' => (string) $params['task_id'],
+            'machine_id' => (int) $machine->id,
+            'machine_name' => (string) $machine->name,
+            'summary' => $task['summary'] ?? [],
+            'status' => (string) $params['status'],
+            'message' => trim((string) ($params['message'] ?? '')),
+            'latency_ms' => $params['latency_ms'] ?? null,
+            'http_code' => $params['http_code'] ?? null,
+            'logs' => trim((string) ($params['logs'] ?? '')),
+            'created_at' => (int) ($task['created_at'] ?? $now),
+            'updated_at' => $now,
+            'tested_at' => $now,
+            'expires_at' => $expiresAt,
+        ];
+
+        if ($result['message'] === '') {
+            $result['message'] = $result['status'] === 'success'
+                ? '节点机器本机真实协议测试成功'
+                : '节点机器本机真实协议测试失败';
+        }
+
+        $this->probeCache()->put('v2node_probe_connectivity_result:' . $params['task_id'], $result, $ttl);
+        $this->probeCache()->forget($taskCacheKey);
+
+        return response()->json([
+            'data' => 'success',
+        ]);
+    }
+
+    private function buildProbeConnectivityTask(Machine $machine): ?array
+    {
+        $cacheKey = 'v2node_probe_connectivity_task:' . $machine->id;
+        $task = $this->probeCache()->get($cacheKey);
+        if (!$task || !is_array($task)) {
+            return null;
+        }
+
+        $expiresAt = (int) ($task['expires_at'] ?? 0);
+        if ($expiresAt > 0 && $expiresAt <= time()) {
+            $this->probeCache()->forget($cacheKey);
+            return null;
+        }
+
+        return $task['connectivity_test_task'] ?? null;
     }
 }

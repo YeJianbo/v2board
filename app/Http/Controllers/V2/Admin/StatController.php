@@ -39,35 +39,12 @@ class StatController extends Controller
 
     private function getOnlineUserSummary(): array
     {
-        $onlineUsers = 0;
-        $onlineDevices = 0;
-
-        foreach (User::query()->pluck('id') as $userId) {
-            $state = Cache::get('ALIVE_IP_USER_' . $userId);
-            if (!is_array($state)) {
-                continue;
-            }
-
-            $count = (int) ($state['alive_ip'] ?? 0);
-            if ($count <= 0) {
-                continue;
-            }
-
-            $onlineUsers++;
-            $onlineDevices += $count;
-        }
-
-        if ($onlineUsers === 0) {
-            $fallback = User::where('t', '>=', time() - 600)->count();
-            return [
-                'users' => $fallback,
-                'devices' => $fallback,
-            ];
-        }
+        $onlineUsers = User::where('t', '>=', time() - 600)->count();
+        $onlineDevices = User::where('t', '>=', time() - 600)->sum('online_count');
 
         return [
-            'users' => $onlineUsers,
-            'devices' => $onlineDevices,
+            'users' => (int) $onlineUsers,
+            'devices' => max((int) $onlineDevices, (int) $onlineUsers),
         ];
     }
 
@@ -338,7 +315,7 @@ class StatController extends Controller
         }
 
         $rows = (clone $statsQuery)
-            ->selectRaw('server_id as id, server_type, MAX(server_rate) as rate, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
+            ->selectRaw('server_id as id, server_type, MAX(server_rate) as rate, SUM(u) as u, SUM(d) as d, SUM(u + d) as total, SUM((u + d) * server_rate) as cost')
             ->groupBy('server_id', 'server_type')
             ->orderBy('total', 'DESC')
             ->get();
@@ -350,12 +327,15 @@ class StatController extends Controller
             $key = $this->buildNodeRankKey($row->server_type ?? null, $row->id);
             return [
                 'id' => (int) $row->id,
+                'key' => $key,
+                'server_type' => strtolower((string) ($row->server_type ?? '')),
                 'type' => (string) ($protocols[$key] ?? $row->server_type),
                 'name' => $names[$key] ?? "Node {$row->id}",
                 'rate' => (string) ($row->rate ?? '1.00'),
                 'u' => (int) $row->u,
                 'd' => (int) $row->d,
                 'total' => (int) $row->total,
+                'cost' => (float) ($row->cost ?? 0),
             ];
         })->values();
 
@@ -465,7 +445,7 @@ class StatController extends Controller
         }
 
         $rows = $baseQuery
-            ->selectRaw('server_id, server_type, record_at, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
+            ->selectRaw('server_id, server_type, record_at, MAX(server_rate) as rate, SUM(u) as u, SUM(d) as d, SUM(u + d) as total, SUM((u + d) * server_rate) as cost')
             ->groupBy('server_id', 'server_type', 'record_at')
             ->orderBy('record_at')
             ->get();
@@ -540,6 +520,7 @@ class StatController extends Controller
                     'u' => 0,
                     'd' => 0,
                     'total' => 0,
+                    'cost' => 0,
                 ];
             }
         }
@@ -559,12 +540,14 @@ class StatController extends Controller
                 'u' => $u,
                 'd' => $d,
                 'total' => $u + $d,
+                'cost' => (float) ($row->cost ?? 0),
             ];
         }
 
         $series = collect($seriesMap)->map(function ($seriesItem) {
             $points = collect($seriesItem['points'])->sortBy('timestamp')->values();
             $total = (int) $points->sum('total');
+            $cost = (float) $points->sum('cost');
 
             return [
                 'key' => $seriesItem['key'],
@@ -572,6 +555,7 @@ class StatController extends Controller
                 'type' => $seriesItem['type'],
                 'name' => $seriesItem['name'],
                 'total' => $total,
+                'cost' => $cost,
                 'points' => $points,
             ];
         })->values();
@@ -592,6 +576,10 @@ class StatController extends Controller
                     'u' => $u,
                     'd' => $d,
                     'total' => $u + $d,
+                    'cost' => array_sum(array_map(function ($item) use ($labelMeta) {
+                        $point = collect($item['points'])->firstWhere('timestamp', $labelMeta['timestamp']);
+                        return (float) ($point['cost'] ?? 0);
+                    }, $series->all())),
                 ];
             })->values();
 
@@ -601,6 +589,7 @@ class StatController extends Controller
                 'type' => 'all',
                 'name' => '全部节点',
                 'total' => (int) $totalPoints->sum('total'),
+                'cost' => (float) $totalPoints->sum('cost'),
                 'points' => $totalPoints,
             ]);
         }
@@ -1062,6 +1051,11 @@ class StatController extends Controller
         return strtolower((string) $type) . ':' . (string) $id;
     }
 
+    private function getNodeRankRowId($item): int
+    {
+        return (int) ($item->id ?? $item->server_id ?? 0);
+    }
+
     private function resolveNodeRankNames($rows)
     {
         $modelMap = [
@@ -1087,14 +1081,28 @@ class StatController extends Controller
                 continue;
             }
 
-            $servers = $modelClass::whereIn('id', $items->pluck('id')->all())
+            $ids = $items
+                ->map(function ($item) {
+                    return $this->getNodeRankRowId($item);
+                })
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+
+            if (empty($ids)) {
+                continue;
+            }
+
+            $servers = $modelClass::whereIn('id', $ids)
                 ->get(['id', 'name'])
                 ->keyBy('id');
 
             foreach ($items as $item) {
-                $server = $servers->get($item->id);
+                $id = $this->getNodeRankRowId($item);
+                $server = $servers->get($id);
                 if ($server && !empty($server->name)) {
-                    $nameMap->put($this->buildNodeRankKey($type, $item->id), $server->name);
+                    $nameMap->put($this->buildNodeRankKey($type, $id), $server->name);
                 }
             }
         }
@@ -1112,20 +1120,34 @@ class StatController extends Controller
         foreach ($groupedRows as $type => $items) {
             if ($type !== 'v2node') {
                 foreach ($items as $item) {
-                    $protocolMap->put($this->buildNodeRankKey($type, $item->id), $type);
+                    $protocolMap->put($this->buildNodeRankKey($type, $this->getNodeRankRowId($item)), $type);
                 }
 
                 continue;
             }
 
-            $servers = \App\Models\ServerV2node::whereIn('id', $items->pluck('id')->all())
+            $ids = $items
+                ->map(function ($item) {
+                    return $this->getNodeRankRowId($item);
+                })
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+
+            if (empty($ids)) {
+                continue;
+            }
+
+            $servers = \App\Models\ServerV2node::whereIn('id', $ids)
                 ->get(['id', 'protocol'])
                 ->keyBy('id');
 
             foreach ($items as $item) {
-                $server = $servers->get($item->id);
+                $id = $this->getNodeRankRowId($item);
+                $server = $servers->get($id);
                 $protocol = strtolower((string) ($server->protocol ?? 'v2node'));
-                $protocolMap->put($this->buildNodeRankKey($type, $item->id), $protocol ?: 'v2node');
+                $protocolMap->put($this->buildNodeRankKey($type, $id), $protocol ?: 'v2node');
             }
         }
 

@@ -1,10 +1,6 @@
 <?php
 
 use Illuminate\Support\Str;
-use Linfo\Linfo;
-
-$lInfo = new Linfo();
-$parser = $lInfo->getParser();
 
 return [
 
@@ -170,40 +166,61 @@ return [
 
     'environments' => [
         'production' => [
-            'V2board' => [
+            'data-pipeline' => [
                 'connection' => 'redis',
-                'queue' => [
-                    'order_handle',
-                    'traffic_fetch',
-                    'stat',
-                    'send_email',
-                    'send_email_mass',
-                    'send_telegram',
-                ],
+                'queue' => ['traffic_fetch', 'stat'],
                 'balance' => 'auto',
                 'minProcesses' => 1,
-                'maxProcesses' => (int)ceil($parser->getRam()['total'] / 1024 / 1024 / 1024 * 6),
+                'maxProcesses' => (int) env('HORIZON_DATA_PIPELINE_MAX', 2),
                 'tries' => 3,
+                'timeout' => 30,
+                'balanceCooldown' => 1,
+            ],
+            'business' => [
+                'connection' => 'redis',
+                'queue' => ['order_handle'],
+                'balance' => 'simple',
+                'minProcesses' => 1,
+                'maxProcesses' => (int) env('HORIZON_BUSINESS_MAX', 1),
+                'tries' => 3,
+                'timeout' => 60,
+            ],
+            'notification' => [
+                'connection' => 'redis',
+                'queue' => ['send_email', 'send_email_mass', 'send_telegram'],
+                'balance' => 'simple',
+                'minProcesses' => 1,
+                'maxProcesses' => (int) env('HORIZON_NOTIFICATION_MAX', 1),
+                'tries' => 3,
+                'timeout' => 60,
                 'balanceCooldown' => 3,
             ],
         ],
 
         'local' => [
-            'V2board' => [
+            'data-pipeline' => [
                 'connection' => 'redis',
-                'queue' => [
-                    'order_handle',
-                    'traffic_fetch',
-                    'stat',
-                    'send_email',
-                    'send_email_mass',
-                    'send_telegram',
-                ],
+                'queue' => ['traffic_fetch', 'stat'],
                 'balance' => 'auto',
                 'minProcesses' => 1,
-                'maxProcesses' => (int)ceil($parser->getRam()['total'] / 1024 / 1024 / 1024 * 6),
+                'maxProcesses' => 2,
                 'tries' => 3,
-                'balanceCooldown' => 3,
+            ],
+            'business' => [
+                'connection' => 'redis',
+                'queue' => ['order_handle'],
+                'balance' => 'simple',
+                'minProcesses' => 1,
+                'maxProcesses' => 1,
+                'tries' => 3,
+            ],
+            'notification' => [
+                'connection' => 'redis',
+                'queue' => ['send_email', 'send_email_mass', 'send_telegram'],
+                'balance' => 'simple',
+                'minProcesses' => 1,
+                'maxProcesses' => 1,
+                'tries' => 3,
             ],
         ],
     ],

@@ -23,6 +23,7 @@ class ServerRoute
                 'v2nodeconfig' => 'v2nodeConfig',
                 'restartack' => 'restartAck',
                 'bbrack' => 'bbrAck',
+                'connectivitytestack' => 'connectivityTestAck',
             ],
         ],
         'machineapi' => [

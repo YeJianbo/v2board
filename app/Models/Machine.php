@@ -12,8 +12,19 @@ class Machine extends Model
     protected $casts = [
         'ddns_enabled' => 'boolean',
         'ddns_proxied' => 'boolean',
+        'probe_auto_update' => 'boolean',
         'relay_rules' => 'array',
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp',
     ];
+
+    public static function statusCacheKeyForId(int $machineId): string
+    {
+        return 'machine:status:' . $machineId;
+    }
+
+    public function statusCacheKey(): string
+    {
+        return self::statusCacheKeyForId((int) $this->getKey());
+    }
 }
