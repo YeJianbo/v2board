@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Services\StatisticalService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 
 class StatController extends Controller
 {
@@ -39,13 +40,25 @@ class StatController extends Controller
 
     private function getOnlineUserSummary(): array
     {
-        $onlineUsers = User::where('t', '>=', time() - 600)->count();
-        $onlineDevices = User::where('t', '>=', time() - 600)->sum('online_count');
+        $onlineQuery = User::where('t', '>=', time() - 600);
+        $onlineUsers = (clone $onlineQuery)->count();
+        $onlineDevices = $onlineUsers;
+
+        if ($this->hasUserOnlineCountColumn()) {
+            $onlineDevices = (clone $onlineQuery)->sum('online_count');
+        }
 
         return [
             'users' => (int) $onlineUsers,
             'devices' => max((int) $onlineDevices, (int) $onlineUsers),
         ];
+    }
+
+    private function hasUserOnlineCountColumn(): bool
+    {
+        return Cache::remember('schema:user:online_count', 86400, function () {
+            return Schema::hasColumn((new User())->getTable(), 'online_count');
+        });
     }
 
 
