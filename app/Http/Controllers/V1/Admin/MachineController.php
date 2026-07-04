@@ -51,18 +51,12 @@ class MachineController extends Controller
                 ]);
             }
 
-            $listenHost = trim((string) ($rule['listen_host'] ?? '0.0.0.0'));
-            $targetHost = trim((string) ($rule['target_host'] ?? ''));
+            $listenHost = trim((string) ($rule['listen_host'] ?? $rule['listenHost'] ?? $rule['local_host'] ?? $rule['localHost'] ?? '0.0.0.0'));
+            $targetHost = trim((string) ($rule['target_host'] ?? $rule['targetHost'] ?? $rule['remote_host'] ?? $rule['remoteHost'] ?? $rule['host'] ?? ''));
             $remark = trim((string) ($rule['remark'] ?? ($rule['name'] ?? '')));
-            $listenPort = (int) ($rule['listen_port'] ?? 0);
-            $targetPort = (int) ($rule['target_port'] ?? 0);
-            $protocols = is_array($rule['protocols'] ?? null) ? $rule['protocols'] : [];
-
-            $protocols = array_values(array_unique(array_filter(array_map(function ($protocol) {
-                return strtolower(trim((string) $protocol));
-            }, $protocols), function ($protocol) {
-                return in_array($protocol, ['tcp', 'udp'], true);
-            })));
+            $listenPort = (int) ($rule['listen_port'] ?? $rule['listenPort'] ?? $rule['local_port'] ?? $rule['localPort'] ?? 0);
+            $targetPort = (int) ($rule['target_port'] ?? $rule['targetPort'] ?? $rule['remote_port'] ?? $rule['remotePort'] ?? $rule['port'] ?? 0);
+            $protocols = $this->normalizeRelayRuleProtocols($rule);
 
             if ($listenHost === '') {
                 $listenHost = '0.0.0.0';
@@ -103,6 +97,38 @@ class MachineController extends Controller
         }
 
         return $normalizedRules;
+    }
+
+    private function normalizeRelayRuleProtocols(array $rule): array
+    {
+        $rawProtocols = $rule['protocols'] ?? null;
+        if ($rawProtocols === null || $rawProtocols === '') {
+            $rawProtocols = $rule['protocol'] ?? ($rule['type'] ?? []);
+        }
+
+        if (is_string($rawProtocols)) {
+            $rawProtocols = preg_split('/[\s,;\/|+]+/', $rawProtocols) ?: [];
+        } elseif (!is_array($rawProtocols)) {
+            $rawProtocols = [$rawProtocols];
+        }
+
+        $protocols = [];
+        foreach ($rawProtocols as $protocol) {
+            $normalized = strtolower(trim((string) $protocol));
+            if ($normalized === '') {
+                continue;
+            }
+            if (in_array($normalized, ['all', 'both', 'tcpudp'], true)) {
+                $protocols[] = 'tcp';
+                $protocols[] = 'udp';
+                continue;
+            }
+            if (in_array($normalized, ['tcp', 'udp'], true)) {
+                $protocols[] = $normalized;
+            }
+        }
+
+        return array_values(array_unique($protocols));
     }
 
     private function resolveMachineConnectHost(Machine $machine): string
@@ -227,11 +253,11 @@ class MachineController extends Controller
                 continue;
             }
 
-            $listenHost = trim((string) ($rule['listen_host'] ?? '0.0.0.0'));
+            $listenHost = trim((string) ($rule['listen_host'] ?? $rule['listenHost'] ?? $rule['local_host'] ?? $rule['localHost'] ?? '0.0.0.0'));
             if ($listenHost === '') {
                 $listenHost = '0.0.0.0';
             }
-            $listenPort = (int) ($rule['listen_port'] ?? 0);
+            $listenPort = (int) ($rule['listen_port'] ?? $rule['listenPort'] ?? $rule['local_port'] ?? $rule['localPort'] ?? 0);
             if ($listenPort < 1 || $listenPort > 65535) {
                 continue;
             }
@@ -241,7 +267,8 @@ class MachineController extends Controller
                 $map[$key] = [];
             }
 
-            foreach ((array) ($rule['protocols'] ?? []) as $protocol) {
+            $protocols = $this->normalizeRelayRuleProtocols($rule);
+            foreach ($protocols as $protocol) {
                 $normalizedProtocol = strtolower(trim((string) $protocol));
                 if (in_array($normalizedProtocol, ['tcp', 'udp'], true)) {
                     $map[$key][$normalizedProtocol] = true;
