@@ -20,6 +20,8 @@ class MachineController extends Controller
     private const ONLINE_WINDOW_SECONDS = 180;
     private const RESTART_TOKEN_TTL_SECONDS = 300;
     private const PROBE_AUTO_UPDATE_INTERVAL_SECONDS = 86400;
+    private const ADMIN_FETCH_CACHE_KEY = 'admin:machine:fetch:v2';
+    private const ADMIN_FETCH_CACHE_SECONDS = 2;
 
     private function probeCache()
     {
@@ -28,6 +30,11 @@ class MachineController extends Controller
         } catch (\Throwable $e) {
             return Cache::store(config('cache.default', 'file'));
         }
+    }
+
+    private function forgetAdminFetchCache(): void
+    {
+        $this->probeCache()->forget(self::ADMIN_FETCH_CACHE_KEY);
     }
 
     private function normalizeRelayRules($relayRules): array
@@ -230,6 +237,97 @@ class MachineController extends Controller
         })->filter()->values()->all();
     }
 
+    private function buildGeneratedRelayRulesByMachine($machines): array
+    {
+        $machineIds = $machines
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->values()
+            ->all();
+
+        if (!$machineIds) {
+            return [];
+        }
+
+        $servers = ServerV2node::query()
+            ->whereIn('relay_machine_id', $machineIds)
+            ->whereNotNull('machine_id')
+            ->whereColumn('machine_id', '!=', 'relay_machine_id')
+            ->orderBy('sort', 'ASC')
+            ->orderBy('id', 'ASC')
+            ->get();
+
+        if ($servers->isEmpty()) {
+            return array_fill_keys($machineIds, []);
+        }
+
+        $parentIds = $servers
+            ->pluck('parent_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        $parentServers = $parentIds
+            ? ServerV2node::query()->whereIn('id', $parentIds)->get()->keyBy('id')
+            : collect();
+
+        $manualOverrideMaps = [];
+        foreach ($machines as $machine) {
+            $machineId = (int) $machine->id;
+            $manualOverrideMaps[$machineId] = $this->buildRelayRuleOverrideMap(
+                is_array($machine->relay_rules) ? $machine->relay_rules : []
+            );
+        }
+
+        $rulesByMachine = array_fill_keys($machineIds, []);
+        foreach ($servers as $server) {
+            $relayMachineId = (int) $server->relay_machine_id;
+            $listenHost = '0.0.0.0';
+            $listenPort = (int) $server->port;
+            if ($listenPort < 1 || $listenPort > 65535) {
+                $listenPort = (int) $server->server_port;
+            }
+
+            $targetPort = (int) $server->server_port;
+            if ($listenPort < 1 || $listenPort > 65535 || $targetPort < 1 || $targetPort > 65535) {
+                continue;
+            }
+
+            $targetHost = $this->resolveRelayTargetHostFromServer($server, $parentServers);
+            if ($targetHost === '') {
+                continue;
+            }
+
+            $protocols = $this->filterAutoRelayProtocolsByManualOverrides(
+                $listenHost,
+                $listenPort,
+                $this->resolveV2nodeRelayProtocols($server),
+                $manualOverrideMaps[$relayMachineId] ?? []
+            );
+            if (!$protocols) {
+                continue;
+            }
+
+            $rulesByMachine[$relayMachineId][] = [
+                'id' => 'generated-v2node-' . $server->id,
+                'source' => 'v2node',
+                'source_node_id' => (int) $server->id,
+                'source_node_name' => (string) $server->name,
+                'listen_host' => $listenHost,
+                'listen_port' => $listenPort,
+                'target_host' => $targetHost,
+                'target_port' => $targetPort,
+                'protocols' => $protocols,
+                'remark' => trim((string) $server->name) ?: ('v2node-' . $server->id),
+                'readonly' => 1,
+            ];
+        }
+
+        return $rulesByMachine;
+    }
+
     private function resolveRelayTargetHostFromServer(ServerV2node $server, $parentServers): string
     {
         $parentId = (int) ($server->parent_id ?: 0);
@@ -293,8 +391,12 @@ class MachineController extends Controller
 
     public function fetch(Request $request)
     {
-        return response([
-            'data' => Machine::orderBy('id', 'DESC')->get()->map(function (Machine $machine) {
+        $data = $this->probeCache()->remember(self::ADMIN_FETCH_CACHE_KEY, self::ADMIN_FETCH_CACHE_SECONDS, function () {
+            $machines = Machine::orderBy('id', 'DESC')->get();
+            $generatedRelayRulesByMachine = $this->buildGeneratedRelayRulesByMachine($machines);
+
+            return $machines->map(function (Machine $machine) use ($generatedRelayRulesByMachine) {
+                $machineId = (int) $machine->id;
                 $status = $this->decodeStatus($machine->status, $machine);
                 $lastSeenAt = $this->resolveLastSeenAt($machine, $status);
                 $isOnline = $lastSeenAt > 0 && (time() - $lastSeenAt) < self::ONLINE_WINDOW_SECONDS;
@@ -333,14 +435,18 @@ class MachineController extends Controller
                     'ddns_last_synced_at' => $ddnsLastSyncedAt,
                     'ddns_error' => $ddnsError,
                     'relay_rules' => $machine->relay_rules ?: [],
-                    'relay_rules_generated' => $this->buildGeneratedRelayRules($machine),
+                    'relay_rules_generated' => $generatedRelayRulesByMachine[$machineId] ?? [],
                     'probe_auto_update' => (int) ($machine->probe_auto_update ? 1 : 0),
                     'is_online' => $isOnline ? 1 : 0,
                     'last_seen_at' => $lastSeenAt,
                     'created_at' => $machine->created_at,
                     'updated_at' => $machine->updated_at,
                 ];
-            })->values()
+            })->values()->all();
+        });
+
+        return response([
+            'data' => $data,
         ]);
     }
 
@@ -516,6 +622,7 @@ class MachineController extends Controller
         }
 
         $this->probeCache()->forget($machine->probeAuthCacheKey());
+        $this->forgetAdminFetchCache();
 
         return response([
             'data' => true
@@ -526,6 +633,7 @@ class MachineController extends Controller
     {
         $machine = Machine::findOrFail($request->input('id'));
         $machine->delete();
+        $this->forgetAdminFetchCache();
         return response([
             'data' => true
         ]);
@@ -632,6 +740,7 @@ class MachineController extends Controller
         if (!empty($server->relay_machine_id)) {
             $this->notifyMachineNodeSetChanged((int) $server->relay_machine_id, false);
         }
+        $this->forgetAdminFetchCache();
 
         return response([
             'data' => [

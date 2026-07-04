@@ -211,6 +211,36 @@ public/assets/admin
 
 不要把本地 `XBoard-admin-src`、`admin_frontend` 等前端源码目录上传到公开仓库。需要更新后台界面时，在私有前端仓库构建后，把构建产物同步到 `public/assets/admin`，再提交后端公开仓库。
 
+## 性能与缓存策略
+
+当前分支把机器探针、v2node 节点、中转规则和流量统计放进同一个后台，但已部署机器不能依赖后台页面持续在线才能转发。性能优化按这个边界处理：
+
+1. 机器本地已经生成的 `/etc/v2node/config.json`、gost 转发规则和防火墙端口继续由机器本地服务维持。面板短暂宕机或后台页面关闭，不会主动清空已部署机器的本地规则。
+2. 后台 `machine/fetch` 只做面板展示用途，使用 2 秒短缓存，并批量生成自动中转规则，避免机器页面轮询造成 N+1 查询。
+3. 前端机器页面有请求防重入。上一轮机器列表请求未结束时，不会继续叠加新的轮询请求。
+4. 探针状态优先写 Redis 状态缓存，数据库只按固定间隔或关键字段变化落盘，降低频繁上报造成的数据库写入。
+5. 历史流量、节点用户排行、连通性测试等重接口应按需打开，不应放进机器列表轮询主链路。
+
+生产环境建议：
+
+```bash
+php artisan config:cache
+php artisan route:cache
+php artisan horizon:terminate
+redis-cli ping
+```
+
+如果 CPU 异常升高，优先检查：
+
+```bash
+top -c
+tail -f storage/logs/laravel.log
+redis-cli info stats
+mysqladmin processlist
+```
+
+不要通过缩短探针轮询到 1 秒以内来追求“实时感”。机器卡片展示适合 3-5 秒级刷新，连通性测试、节点明细和历史图表按需加载。
+
 ## v2node 部署方式
 
 配套 v2node 仓库：
@@ -329,9 +359,45 @@ X-V2Node-Nonce
 X-V2Node-Signature
 ```
 
-后端会校验时间窗口、nonce 重放和机器密钥。`v2_machine.host` 如果填写了 IP，会作为来源 IP 白名单；多个 IP 用英文逗号分隔。
+后端会校验时间窗口、nonce 重放和机器密钥。`v2_machine.host` 只作为机器入口地址和显示地址，不作为默认来源 IP 白名单。
 
-不要把机器通信密钥、通用安装密钥、后台 cookie 或 `.env` 提交到仓库。
+当前安全边界：
+
+1. 后台机器管理、通用安装密钥、DDNS 配置和节点创建接口都挂在 `/api/v1/admin/*`，必须登录后台并通过管理员鉴权。
+2. 探针公开接口只允许固定 action，路由层有 allowlist；不存在通配控制器任意调用。
+3. 旧版 unsigned `machineapi` 已禁用，返回 410。
+4. 通用远程命令下发已禁用，返回 410；探针只支持配置同步、DDNS、端口转发、v2node 重启、BBR 和连通性测试这类受限操作。
+5. DDNS 由面板服务端调用 Cloudflare API，机器端不接收 Cloudflare token。
+6. 默认不启用来源 IP 白名单。动态 IP、NAT、双栈出口机器以 HMAC 签名为准，避免出口变化导致机器全部离线。
+7. 探针不提供 WebSSH，也不应加入任意 shell 执行能力。
+
+不要把机器通信密钥、通用安装密钥、后台 cookie、Cloudflare token 或 `.env` 提交到仓库。怀疑泄露时，重新生成机器 token 或删除旧机器重新注册。
+
+### 面板宕机时的机器行为
+
+已部署机器必须保持“最后一次成功同步”的本地状态：
+
+- v2node 服务继续使用本地 `/etc/v2node/config.json`。
+- gost 继续使用本地已有转发规则。
+- 防火墙端口不会因为面板不可用被关闭。
+- 面板恢复后，探针下一次同步再应用新的节点和转发规则。
+
+因此升级面板时不要删除机器本地配置，也不要在面板不可用时下发空规则。需要回滚时，优先回滚面板代码和数据库迁移，不要 SSH 到每台节点机清空 v2node/gost。
+
+### 探针接口检查
+
+可在面板服务器检查公开路由是否被限制：
+
+```bash
+php artisan route:list | grep 'server/machine'
+php artisan route:list | grep 'machineapi'
+```
+
+预期：
+
+- `/api/v1/server/machine/enroll` 只接受一次性安装 token。
+- `/api/v1/server/machine/config`、`push`、`v2nodeconfig`、`restartack`、`bbrack`、`connectivitytestack` 均要求 HMAC 签名。
+- `/api/v1/server/machineapi/*` 不再可用。
 
 ## 升级已有站点
 
@@ -350,6 +416,14 @@ php artisan config:cache
 php artisan horizon:terminate
 ```
 
+低风险升级流程：
+
+1. 先备份代码目录、`.env` 和数据库。
+2. 不停止节点机器上的 `v2node` 与 `gost` 服务。
+3. 面板代码更新后只重载 PHP-FPM、清理 Laravel 缓存和重启 Horizon。
+4. 登录后台确认机器页面可打开，再逐台观察探针是否自然恢复在线。
+5. 只有确认新版本正常后，才考虑升级节点机器上的 v2node 探针。
+
 升级后检查：
 
 1. 后台能通过 `/{secure_path}` 打开。
@@ -359,6 +433,25 @@ php artisan horizon:terminate
 5. 探针上线后能显示 IP、CPU、内存、磁盘和网络数据。
 6. 探针页面可以创建 v2node 节点。
 7. v2node 传统安装命令能追加节点。
+
+### 回滚
+
+如果升级后后台异常，但节点机器仍在转发，先不要动节点机器。按下面顺序回滚面板：
+
+```bash
+cd /www/wwwroot/v2board
+git log --oneline -5
+git checkout <上一个可用 commit>
+composer install --no-dev --optimize-autoloader
+php artisan config:clear
+php artisan cache:clear
+php artisan config:cache
+php artisan route:cache
+php artisan horizon:terminate
+systemctl reload php-fpm-81 || systemctl restart php-fpm-81
+```
+
+如果这次发布包含数据库迁移，先确认迁移是否可逆。不能确认时不要直接回滚数据库结构，优先用代码兼容旧字段或恢复数据库备份。
 
 ## 故障排查
 
