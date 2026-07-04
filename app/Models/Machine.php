@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Cache;
 
 class Machine extends Model
 {
@@ -26,5 +27,27 @@ class Machine extends Model
     public function statusCacheKey(): string
     {
         return self::statusCacheKeyForId((int) $this->getKey());
+    }
+
+    public static function probeAuthCacheKeyForId(int $machineId): string
+    {
+        return 'machine:probe_auth:' . $machineId;
+    }
+
+    public function probeAuthCacheKey(): string
+    {
+        return self::probeAuthCacheKeyForId((int) $this->getKey());
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (Machine $machine) {
+            Cache::forget($machine->probeAuthCacheKey());
+        });
+
+        static::deleted(function (Machine $machine) {
+            Cache::forget($machine->probeAuthCacheKey());
+            Cache::forget($machine->statusCacheKey());
+        });
     }
 }

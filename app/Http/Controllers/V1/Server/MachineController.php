@@ -11,10 +11,10 @@ use App\Models\ServerVless;
 use App\Models\ServerHysteria;
 use App\Models\ServerTuic;
 use App\Models\ServerV2node;
+use App\Services\SettingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
@@ -22,6 +22,7 @@ class MachineController extends Controller
 {
     private const PROBE_AUTO_UPDATE_INTERVAL_SECONDS = 86400;
     private const PROBE_STATUS_PERSIST_INTERVAL_SECONDS = 30;
+    private const PROBE_MACHINE_AUTH_CACHE_SECONDS = 600;
 
     private const SIGNATURE_WINDOW_SECONDS = 300;
     private const ENROLL_TOKEN_TTL_SECONDS = 604800;
@@ -43,7 +44,7 @@ class MachineController extends Controller
             return $configValue;
         }
 
-        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        $dbValue = app(SettingService::class)->get($key);
         if ($dbValue !== null && $dbValue !== '') {
             return $dbValue;
         }
@@ -59,6 +60,35 @@ class MachineController extends Controller
         }
 
         abort(401, 'Unauthorized: Signed probe request required');
+    }
+
+    private function restoreMachineFromAttributes(?array $attributes): ?Machine
+    {
+        if (!$attributes) {
+            return null;
+        }
+
+        $machine = new Machine();
+        $machine->forceFill($attributes);
+        $machine->exists = true;
+
+        return $machine;
+    }
+
+    private function findMachineForProbeAuth(int $machineId): ?Machine
+    {
+        $cacheKey = Machine::probeAuthCacheKeyForId($machineId);
+
+        try {
+            $attributes = $this->probeCache()->remember($cacheKey, self::PROBE_MACHINE_AUTH_CACHE_SECONDS, function () use ($machineId) {
+                $machine = Machine::query()->whereKey($machineId)->first();
+                return $machine ? $machine->getAttributes() : null;
+            });
+
+            return $this->restoreMachineFromAttributes(is_array($attributes) ? $attributes : null);
+        } catch (\Throwable $e) {
+            return Machine::find($machineId);
+        }
     }
 
     private function authenticateSignedRequest(Request $request)
@@ -94,7 +124,7 @@ class MachineController extends Controller
             abort(401, 'Unauthorized: Invalid nonce');
         }
 
-        $machine = Machine::find((int) $machineId);
+        $machine = $this->findMachineForProbeAuth((int) $machineId);
         if (!$machine || empty($machine->api_token)) {
             abort(401, 'Unauthorized: Invalid machine');
         }
@@ -825,6 +855,7 @@ class MachineController extends Controller
         if (empty($apiHost) || strpos($apiHost, 'localhost') !== false) {
             $apiHost = $request->getSchemeAndHttpHost();
         }
+        $apiKey = (string) $this->panelSetting('server_token', '');
 
         $types = [
             'vmess' => ServerVmess::class,
@@ -847,8 +878,6 @@ class MachineController extends Controller
                     $core = 'sing';
                 }
                 
-                $apiKey = $this->panelSetting('server_token', '');
-
                 $nodes[] = [
                     'ApiConfig' => [
                         'ApiHost' => $apiHost,
