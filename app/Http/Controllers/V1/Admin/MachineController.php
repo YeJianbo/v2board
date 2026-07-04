@@ -102,7 +102,7 @@ class MachineController extends Controller
     private function normalizeRelayRuleProtocols(array $rule): array
     {
         $rawProtocols = $rule['protocols'] ?? null;
-        if ($rawProtocols === null || $rawProtocols === '') {
+        if ($rawProtocols === null || $rawProtocols === '' || (is_array($rawProtocols) && !$rawProtocols)) {
             $rawProtocols = $rule['protocol'] ?? ($rule['type'] ?? []);
         }
 
