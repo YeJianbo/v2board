@@ -1142,7 +1142,6 @@ class MachineController extends Controller
     public function v2nodeConfig(Request $request)
     {
         $machine = $this->authenticate($request);
-        $machine = Machine::findOrFail((int) $machine->id);
         $this->touchMachineHeartbeat($machine, $request);
         $status = $this->decodeMachineStatus($machine);
 
