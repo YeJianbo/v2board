@@ -568,11 +568,6 @@ class MachineController extends Controller
         return $zoneName !== '' ? "{$recordName}.{$zoneName}" : $recordName;
     }
 
-    private function machineHasDdnsApiToken(Machine $machine): bool
-    {
-        return trim((string) $machine->ddns_api_token) !== '';
-    }
-
     private function encryptMachineDdnsApiToken(?string $value): ?string
     {
         $value = trim((string) $value);
