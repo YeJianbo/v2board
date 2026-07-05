@@ -23,6 +23,7 @@ class MachineController extends Controller
     private const PROBE_AUTO_UPDATE_INTERVAL_SECONDS = 86400;
     private const PROBE_STATUS_PERSIST_INTERVAL_SECONDS = 120;
     private const PROBE_MACHINE_AUTH_CACHE_SECONDS = 600;
+    private const DDNS_ERROR_RETRY_INTERVAL_SECONDS = 300;
 
     private const SIGNATURE_WINDOW_SECONDS = 300;
     private const ENROLL_TOKEN_TTL_SECONDS = 604800;
@@ -579,6 +580,16 @@ class MachineController extends Controller
         ) {
             return $status;
         }
+
+        if (
+            trim((string) ($status['ddns_fingerprint'] ?? '')) === $fingerprint &&
+            trim((string) ($status['ddns_error'] ?? '')) !== '' &&
+            (time() - (int) ($status['ddns_attempted_at'] ?? 0)) < self::DDNS_ERROR_RETRY_INTERVAL_SECONDS
+        ) {
+            return $status;
+        }
+
+        $status['ddns_attempted_at'] = time();
 
         try {
             $client = Http::baseUrl('https://api.cloudflare.com/client/v4')
