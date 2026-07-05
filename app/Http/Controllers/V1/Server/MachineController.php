@@ -716,8 +716,9 @@ class MachineController extends Controller
             ->keyBy('id');
         $manualRelayRules = $manualRelayRules ?? $this->buildMachineRelayRules($machine);
         $manualOverrideMap = $this->buildRelayRuleOverrideMap($manualRelayRules);
+        $occupiedAutoMap = [];
 
-        return $servers->map(function (ServerV2node $server) use ($parentServers, $manualOverrideMap) {
+        return $servers->map(function (ServerV2node $server) use ($parentServers, $manualOverrideMap, &$occupiedAutoMap) {
             $listenHost = '0.0.0.0';
 
             $listenPort = (int) $server->port;
@@ -744,6 +745,19 @@ class MachineController extends Controller
                 return null;
             }
 
+            $listenKey = strtolower($listenHost) . ':' . $listenPort;
+            $protocols = array_values(array_filter($protocols, function ($protocol) use ($listenKey, &$occupiedAutoMap) {
+                $protocol = strtolower(trim((string) $protocol));
+                if ($protocol === '' || isset($occupiedAutoMap[$listenKey][$protocol])) {
+                    return false;
+                }
+                $occupiedAutoMap[$listenKey][$protocol] = true;
+                return true;
+            }));
+            if (!$protocols) {
+                return null;
+            }
+
             return [
                 'node_id' => (int) $server->id,
                 'name' => (string) $server->name,
@@ -755,6 +769,45 @@ class MachineController extends Controller
                 'protocols' => $protocols,
             ];
         })->filter()->values()->all();
+    }
+
+    private function filterDeployableMachineV2nodeServers($servers)
+    {
+        $occupied = [];
+
+        return $servers->filter(function (ServerV2node $server) use (&$occupied) {
+            $port = (int) $server->server_port;
+            if ($port < 1 || $port > 65535) {
+                return false;
+            }
+
+            $protocols = $this->resolveV2nodeFirewallProtocols($server);
+            if (!$protocols) {
+                return false;
+            }
+
+            $availableProtocols = [];
+            foreach ($protocols as $protocol) {
+                $protocol = strtolower(trim((string) $protocol));
+                if (!in_array($protocol, ['tcp', 'udp'], true)) {
+                    continue;
+                }
+                if (isset($occupied[$port][$protocol])) {
+                    continue;
+                }
+                $availableProtocols[] = $protocol;
+            }
+
+            if (!$availableProtocols) {
+                return false;
+            }
+
+            foreach ($availableProtocols as $protocol) {
+                $occupied[$port][$protocol] = true;
+            }
+
+            return true;
+        })->values();
     }
 
     private function resolveRelayTargetHostFromServer(ServerV2node $server, $parentServers): string
@@ -1163,6 +1216,7 @@ class MachineController extends Controller
             ->orderBy('sort', 'ASC')
             ->orderBy('id', 'ASC')
             ->get();
+        $machineServers = $this->filterDeployableMachineV2nodeServers($machineServers);
 
         $nodes = $machineServers
             ->map(function (ServerV2node $server) use ($apiHost, $apiKey) {
