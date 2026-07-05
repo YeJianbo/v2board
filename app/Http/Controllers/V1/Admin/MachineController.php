@@ -390,7 +390,28 @@ class MachineController extends Controller
 
     public function fetch(Request $request)
     {
-        $machines = Machine::orderBy('id', 'DESC')->get();
+        $machines = Machine::query()
+            ->select([
+                'id',
+                'name',
+                'host',
+                'status',
+                'ddns_enabled',
+                'ddns_provider',
+                'ddns_zone_name',
+                'ddns_record_name',
+                'ddns_record_type',
+                'ddns_ttl',
+                'ddns_proxied',
+                'relay_rules',
+                'probe_auto_update',
+                'created_at',
+                'updated_at',
+            ])
+            ->selectRaw("CASE WHEN COALESCE(api_token, '') = '' THEN 0 ELSE 1 END AS api_token_present")
+            ->selectRaw("CASE WHEN COALESCE(ddns_api_token, '') = '' THEN 0 ELSE 1 END AS ddns_api_token_present")
+            ->orderBy('id', 'DESC')
+            ->get();
         $generatedRelayRulesByMachine = $this->probeCache()->remember(
             Machine::ADMIN_GENERATED_RELAY_RULES_CACHE_KEY,
             self::ADMIN_FETCH_CACHE_SECONDS,
@@ -421,7 +442,7 @@ class MachineController extends Controller
                 'display_host' => $displayHost,
                 'connect_host' => $displayHost ?: ($reportedIp ?: (string) $machine->host),
                 'reported_ip' => $reportedIp,
-                'api_token_present' => trim((string) $machine->api_token) !== '' ? 1 : 0,
+                'api_token_present' => (int) ($machine->api_token_present ?? 0),
                 'status_data' => $status,
                 'country_code' => $countryCode,
                 'country' => $country,
@@ -432,7 +453,7 @@ class MachineController extends Controller
                 'ddns_record_type' => (string) ($machine->ddns_record_type ?: 'A'),
                 'ddns_ttl' => (int) ($machine->ddns_ttl ?: 120),
                 'ddns_proxied' => (int) ($machine->ddns_proxied ? 1 : 0),
-                'ddns_has_api_token' => $this->machineHasDdnsApiToken($machine) ? 1 : 0,
+                'ddns_has_api_token' => (int) ($machine->ddns_api_token_present ?? 0),
                 'ddns_host' => $ddnsHost,
                 'ddns_last_synced_ip' => $ddnsLastSyncedIp,
                 'ddns_last_synced_at' => $ddnsLastSyncedAt,
