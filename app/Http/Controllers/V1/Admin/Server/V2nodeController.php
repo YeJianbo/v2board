@@ -215,12 +215,8 @@ class V2nodeController extends Controller
                 abort(422, '父节点未绑定在线机器，无法创建中转子节点');
             }
 
-            if (empty($params['relay_machine_id'])) {
-                abort(422, '子节点必须选择中转服务器');
-            }
-
             $params['machine_id'] = $parentMachineId;
-            if ((int) $params['relay_machine_id'] === $parentMachineId) {
+            if (!empty($params['relay_machine_id']) && (int) $params['relay_machine_id'] === $parentMachineId) {
                 abort(422, '中转服务器不能与父节点落地机相同');
             }
         }
@@ -344,15 +340,11 @@ class V2nodeController extends Controller
                 abort(422, '父节点未绑定在线机器，无法更新中转子节点');
             }
 
-            if (empty($params['relay_machine_id']) && empty($server->relay_machine_id)) {
-                abort(422, '子节点必须选择中转服务器');
-            }
-
             $params['machine_id'] = $parentMachineId;
             $nextRelayMachineId = !empty($params['relay_machine_id'])
                 ? (int) $params['relay_machine_id']
                 : (int) ($server->relay_machine_id ?: 0);
-            if ($nextRelayMachineId === $parentMachineId) {
+            if ($nextRelayMachineId > 0 && $nextRelayMachineId === $parentMachineId) {
                 abort(422, '中转服务器不能与父节点落地机相同');
             }
         }
