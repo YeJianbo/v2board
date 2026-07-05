@@ -29,6 +29,8 @@ class MachineController extends Controller
     private const ENROLL_TOKEN_TTL_SECONDS = 604800;
     private const ENROLL_TOKEN_DEFAULT_MAX_USES = 100;
 
+    private array $panelSettingCache = [];
+
     private function probeCache()
     {
         try {
@@ -40,17 +42,21 @@ class MachineController extends Controller
 
     private function panelSetting(string $key, $default = null)
     {
+        if (array_key_exists($key, $this->panelSettingCache)) {
+            return $this->panelSettingCache[$key];
+        }
+
         $configValue = config('v2board.' . $key);
         if ($configValue !== null && $configValue !== '') {
-            return $configValue;
+            return $this->panelSettingCache[$key] = $configValue;
         }
 
         $dbValue = app(SettingService::class)->get($key);
         if ($dbValue !== null && $dbValue !== '') {
-            return $dbValue;
+            return $this->panelSettingCache[$key] = $dbValue;
         }
 
-        return $default;
+        return $this->panelSettingCache[$key] = $default;
     }
 
     private function authenticate(Request $request)
