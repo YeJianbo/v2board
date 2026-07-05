@@ -88,7 +88,27 @@ class MachineController extends Controller
 
         try {
             $attributes = $this->probeCache()->remember($cacheKey, self::PROBE_MACHINE_AUTH_CACHE_SECONDS, function () use ($machineId) {
-                $machine = Machine::query()->whereKey($machineId)->first();
+                $machine = Machine::query()
+                    ->select([
+                        'id',
+                        'name',
+                        'host',
+                        'api_token',
+                        'status',
+                        'ddns_enabled',
+                        'ddns_provider',
+                        'ddns_zone_name',
+                        'ddns_record_name',
+                        'ddns_record_type',
+                        'ddns_ttl',
+                        'ddns_proxied',
+                        'ddns_api_token',
+                        'relay_rules',
+                        'probe_auto_update',
+                        'updated_at',
+                    ])
+                    ->whereKey($machineId)
+                    ->first();
                 return $machine ? $machine->getAttributes() : null;
             });
 
