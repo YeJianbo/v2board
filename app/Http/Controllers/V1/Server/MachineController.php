@@ -21,7 +21,7 @@ use Illuminate\Support\Str;
 class MachineController extends Controller
 {
     private const PROBE_AUTO_UPDATE_INTERVAL_SECONDS = 86400;
-    private const PROBE_STATUS_PERSIST_INTERVAL_SECONDS = 30;
+    private const PROBE_STATUS_PERSIST_INTERVAL_SECONDS = 120;
     private const PROBE_MACHINE_AUTH_CACHE_SECONDS = 600;
 
     private const SIGNATURE_WINDOW_SECONDS = 300;
