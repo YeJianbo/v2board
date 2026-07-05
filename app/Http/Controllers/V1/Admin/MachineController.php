@@ -20,7 +20,6 @@ class MachineController extends Controller
     private const ONLINE_WINDOW_SECONDS = 180;
     private const RESTART_TOKEN_TTL_SECONDS = 300;
     private const PROBE_AUTO_UPDATE_INTERVAL_SECONDS = 86400;
-    private const ADMIN_FETCH_CACHE_KEY = 'admin:machine:fetch:v2';
     private const ADMIN_FETCH_CACHE_SECONDS = 2;
 
     private function probeCache()
@@ -34,7 +33,7 @@ class MachineController extends Controller
 
     private function forgetAdminFetchCache(): void
     {
-        $this->probeCache()->forget(self::ADMIN_FETCH_CACHE_KEY);
+        Machine::forgetAdminFetchCache();
     }
 
     private function normalizeRelayRules($relayRules): array
@@ -391,7 +390,7 @@ class MachineController extends Controller
 
     public function fetch(Request $request)
     {
-        $data = $this->probeCache()->remember(self::ADMIN_FETCH_CACHE_KEY, self::ADMIN_FETCH_CACHE_SECONDS, function () {
+        $data = $this->probeCache()->remember(Machine::ADMIN_FETCH_CACHE_KEY, self::ADMIN_FETCH_CACHE_SECONDS, function () {
             $machines = Machine::orderBy('id', 'DESC')->get();
             $generatedRelayRulesByMachine = $this->buildGeneratedRelayRulesByMachine($machines);
 

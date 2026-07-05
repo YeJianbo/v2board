@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\V1\Admin\Server;
 
 use App\Http\Controllers\Controller;
+use App\Models\Machine;
 use App\Models\ServerV2node;
 use App\Services\NodeSyncService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use ParagonIE_Sodium_Compat as SodiumCompat;
 use App\Utils\Helper;
 use Illuminate\Support\Str;
@@ -22,12 +22,14 @@ class V2nodeController extends Controller
 
         foreach ($machineIds as $machineId) {
             NodeSyncService::notifyMachineNodesChanged($machineId);
-            Cache::put(
+            Machine::probeCache()->put(
                 'v2node_probe_restart:' . $machineId,
                 (string) time() . '-' . Str::random(12),
                 self::RESTART_TOKEN_TTL_SECONDS
             );
         }
+
+        Machine::forgetAdminFetchCache();
     }
 
     public function save(Request $request)

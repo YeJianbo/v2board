@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Cache;
 
 class Machine extends Model
 {
+    public const ADMIN_FETCH_CACHE_KEY = 'admin:machine:fetch:v2';
+
     protected $table = 'v2_machine';
     protected $dateFormat = 'U';
     protected $guarded = ['id'];
@@ -39,15 +41,31 @@ class Machine extends Model
         return self::probeAuthCacheKeyForId((int) $this->getKey());
     }
 
+    public static function probeCache()
+    {
+        try {
+            return Cache::store('redis');
+        } catch (\Throwable $e) {
+            return Cache::store(config('cache.default', 'file'));
+        }
+    }
+
+    public static function forgetAdminFetchCache(): void
+    {
+        self::probeCache()->forget(self::ADMIN_FETCH_CACHE_KEY);
+    }
+
     protected static function booted(): void
     {
         static::saved(function (Machine $machine) {
-            Cache::forget($machine->probeAuthCacheKey());
+            self::probeCache()->forget($machine->probeAuthCacheKey());
+            self::forgetAdminFetchCache();
         });
 
         static::deleted(function (Machine $machine) {
-            Cache::forget($machine->probeAuthCacheKey());
-            Cache::forget($machine->statusCacheKey());
+            self::probeCache()->forget($machine->probeAuthCacheKey());
+            self::probeCache()->forget($machine->statusCacheKey());
+            self::forgetAdminFetchCache();
         });
     }
 }
