@@ -32,6 +32,7 @@ class AdminRoute
             $router->get ('/machine/fetch', 'V1\\Admin\\MachineController@fetch');
             $router->post('/machine/save', 'V1\\Admin\\MachineController@save');
             $router->post('/machine/drop', 'V1\\Admin\\MachineController@drop');
+            $router->post('/machine/token', 'V1\\Admin\\MachineController@token');
             $router->post('/machine/installToken', 'V1\\Admin\\MachineController@installToken');
             $router->post('/machine/createV2node', 'V1\\Admin\\MachineController@createV2node');
             $router->post('/machine/deployCommand', 'V1\\Admin\\MachineController@deployCommand');

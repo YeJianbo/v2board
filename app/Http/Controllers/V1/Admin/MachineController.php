@@ -421,7 +421,7 @@ class MachineController extends Controller
                 'display_host' => $displayHost,
                 'connect_host' => $displayHost ?: ($reportedIp ?: (string) $machine->host),
                 'reported_ip' => $reportedIp,
-                'api_token' => $machine->api_token,
+                'api_token_present' => trim((string) $machine->api_token) !== '' ? 1 : 0,
                 'status' => $machine->status,
                 'status_data' => $status,
                 'country_code' => $countryCode,
@@ -639,6 +639,26 @@ class MachineController extends Controller
         $this->forgetAdminFetchCache();
         return response([
             'data' => true
+        ]);
+    }
+
+    public function token(Request $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|exists:v2_machine,id',
+        ]);
+
+        $machine = Machine::findOrFail($params['id']);
+        if (empty($machine->api_token)) {
+            $machine->api_token = Str::random(32);
+            $machine->save();
+        }
+
+        return response([
+            'data' => [
+                'id' => (int) $machine->id,
+                'api_token' => (string) $machine->api_token,
+            ],
         ]);
     }
 
