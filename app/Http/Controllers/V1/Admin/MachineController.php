@@ -422,7 +422,6 @@ class MachineController extends Controller
                 'connect_host' => $displayHost ?: ($reportedIp ?: (string) $machine->host),
                 'reported_ip' => $reportedIp,
                 'api_token_present' => trim((string) $machine->api_token) !== '' ? 1 : 0,
-                'status' => $machine->status,
                 'status_data' => $status,
                 'country_code' => $countryCode,
                 'country' => $country,
