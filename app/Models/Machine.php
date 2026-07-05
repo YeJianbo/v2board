@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Cache;
 
 class Machine extends Model
 {
-    public const ADMIN_FETCH_CACHE_KEY = 'admin:machine:fetch:v2';
+    public const ADMIN_GENERATED_RELAY_RULES_CACHE_KEY = 'admin:machine:generated_relay_rules:v1';
 
     protected $table = 'v2_machine';
     protected $dateFormat = 'U';
@@ -52,7 +52,7 @@ class Machine extends Model
 
     public static function forgetAdminFetchCache(): void
     {
-        self::probeCache()->forget(self::ADMIN_FETCH_CACHE_KEY);
+        self::probeCache()->forget(self::ADMIN_GENERATED_RELAY_RULES_CACHE_KEY);
     }
 
     protected static function booted(): void

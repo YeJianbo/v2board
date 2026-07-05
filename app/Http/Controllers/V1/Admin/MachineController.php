@@ -390,59 +390,63 @@ class MachineController extends Controller
 
     public function fetch(Request $request)
     {
-        $data = $this->probeCache()->remember(Machine::ADMIN_FETCH_CACHE_KEY, self::ADMIN_FETCH_CACHE_SECONDS, function () {
-            $machines = Machine::orderBy('id', 'DESC')->get();
-            $generatedRelayRulesByMachine = $this->buildGeneratedRelayRulesByMachine($machines);
+        $machines = Machine::orderBy('id', 'DESC')->get();
+        $generatedRelayRulesByMachine = $this->probeCache()->remember(
+            Machine::ADMIN_GENERATED_RELAY_RULES_CACHE_KEY,
+            self::ADMIN_FETCH_CACHE_SECONDS,
+            function () use ($machines) {
+                return $this->buildGeneratedRelayRulesByMachine($machines);
+            }
+        );
 
-            return $machines->map(function (Machine $machine) use ($generatedRelayRulesByMachine) {
-                $machineId = (int) $machine->id;
-                $status = $this->decodeStatus($machine->status, $machine);
-                $lastSeenAt = $this->resolveLastSeenAt($machine, $status);
-                $isOnline = $lastSeenAt > 0 && (time() - $lastSeenAt) < self::ONLINE_WINDOW_SECONDS;
-                $reportedIp = $this->resolveReportedIp($status);
-                $ddnsHost = $this->resolveDdnsHost($machine);
-                $displayHost = $this->resolveDisplayHost($machine->host, $status, $ddnsHost);
-                $countryCode = strtoupper((string) ($status['country_code'] ?? ''));
-                $country = (string) ($status['country'] ?? '');
-                $ddnsLastSyncedAt = (int) ($status['ddns_synced_at'] ?? 0);
-                $ddnsLastSyncedIp = trim((string) ($status['ddns_synced_ip'] ?? ''));
-                $ddnsError = trim((string) ($status['ddns_error'] ?? ''));
+        $data = $machines->map(function (Machine $machine) use ($generatedRelayRulesByMachine) {
+            $machineId = (int) $machine->id;
+            $status = $this->decodeStatus($machine->status, $machine);
+            $lastSeenAt = $this->resolveLastSeenAt($machine, $status);
+            $isOnline = $lastSeenAt > 0 && (time() - $lastSeenAt) < self::ONLINE_WINDOW_SECONDS;
+            $reportedIp = $this->resolveReportedIp($status);
+            $ddnsHost = $this->resolveDdnsHost($machine);
+            $displayHost = $this->resolveDisplayHost($machine->host, $status, $ddnsHost);
+            $countryCode = strtoupper((string) ($status['country_code'] ?? ''));
+            $country = (string) ($status['country'] ?? '');
+            $ddnsLastSyncedAt = (int) ($status['ddns_synced_at'] ?? 0);
+            $ddnsLastSyncedIp = trim((string) ($status['ddns_synced_ip'] ?? ''));
+            $ddnsError = trim((string) ($status['ddns_error'] ?? ''));
 
-                return [
-                    'id' => $machine->id,
-                    'name' => $machine->name,
-                    'host' => $displayHost,
-                    'configured_host' => $machine->host,
-                    'display_host' => $displayHost,
-                    'connect_host' => $displayHost ?: ($reportedIp ?: (string) $machine->host),
-                    'reported_ip' => $reportedIp,
-                    'api_token' => $machine->api_token,
-                    'status' => $machine->status,
-                    'status_data' => $status,
-                    'country_code' => $countryCode,
-                    'country' => $country,
-                    'ddns_enabled' => (int) ($machine->ddns_enabled ? 1 : 0),
-                    'ddns_provider' => (string) ($machine->ddns_provider ?: 'cloudflare'),
-                    'ddns_zone_name' => (string) ($machine->ddns_zone_name ?: ''),
-                    'ddns_record_name' => (string) ($machine->ddns_record_name ?: ''),
-                    'ddns_record_type' => (string) ($machine->ddns_record_type ?: 'A'),
-                    'ddns_ttl' => (int) ($machine->ddns_ttl ?: 120),
-                    'ddns_proxied' => (int) ($machine->ddns_proxied ? 1 : 0),
-                    'ddns_has_api_token' => $this->machineHasDdnsApiToken($machine) ? 1 : 0,
-                    'ddns_host' => $ddnsHost,
-                    'ddns_last_synced_ip' => $ddnsLastSyncedIp,
-                    'ddns_last_synced_at' => $ddnsLastSyncedAt,
-                    'ddns_error' => $ddnsError,
-                    'relay_rules' => $machine->relay_rules ?: [],
-                    'relay_rules_generated' => $generatedRelayRulesByMachine[$machineId] ?? [],
-                    'probe_auto_update' => (int) ($machine->probe_auto_update ? 1 : 0),
-                    'is_online' => $isOnline ? 1 : 0,
-                    'last_seen_at' => $lastSeenAt,
-                    'created_at' => $machine->created_at,
-                    'updated_at' => $machine->updated_at,
-                ];
-            })->values()->all();
-        });
+            return [
+                'id' => $machine->id,
+                'name' => $machine->name,
+                'host' => $displayHost,
+                'configured_host' => $machine->host,
+                'display_host' => $displayHost,
+                'connect_host' => $displayHost ?: ($reportedIp ?: (string) $machine->host),
+                'reported_ip' => $reportedIp,
+                'api_token' => $machine->api_token,
+                'status' => $machine->status,
+                'status_data' => $status,
+                'country_code' => $countryCode,
+                'country' => $country,
+                'ddns_enabled' => (int) ($machine->ddns_enabled ? 1 : 0),
+                'ddns_provider' => (string) ($machine->ddns_provider ?: 'cloudflare'),
+                'ddns_zone_name' => (string) ($machine->ddns_zone_name ?: ''),
+                'ddns_record_name' => (string) ($machine->ddns_record_name ?: ''),
+                'ddns_record_type' => (string) ($machine->ddns_record_type ?: 'A'),
+                'ddns_ttl' => (int) ($machine->ddns_ttl ?: 120),
+                'ddns_proxied' => (int) ($machine->ddns_proxied ? 1 : 0),
+                'ddns_has_api_token' => $this->machineHasDdnsApiToken($machine) ? 1 : 0,
+                'ddns_host' => $ddnsHost,
+                'ddns_last_synced_ip' => $ddnsLastSyncedIp,
+                'ddns_last_synced_at' => $ddnsLastSyncedAt,
+                'ddns_error' => $ddnsError,
+                'relay_rules' => $machine->relay_rules ?: [],
+                'relay_rules_generated' => $generatedRelayRulesByMachine[$machineId] ?? [],
+                'probe_auto_update' => (int) ($machine->probe_auto_update ? 1 : 0),
+                'is_online' => $isOnline ? 1 : 0,
+                'last_seen_at' => $lastSeenAt,
+                'created_at' => $machine->created_at,
+                'updated_at' => $machine->updated_at,
+            ];
+        })->values()->all();
 
         return response([
             'data' => $data,
