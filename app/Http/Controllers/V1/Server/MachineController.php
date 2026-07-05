@@ -408,6 +408,7 @@ class MachineController extends Controller
             'gost_status',
             'gost_version',
             'listen_ports',
+            'listen_processes',
             'ddns_host',
             'ddns_synced_ip',
             'ddns_synced_at',
@@ -716,9 +717,11 @@ class MachineController extends Controller
             ->keyBy('id');
         $manualRelayRules = $manualRelayRules ?? $this->buildMachineRelayRules($machine);
         $manualOverrideMap = $this->buildRelayRuleOverrideMap($manualRelayRules);
+        $status = $this->decodeMachineStatus($machine);
+        $listenProcessMap = $this->buildListenProcessMap($status);
         $occupiedAutoMap = [];
 
-        return $servers->map(function (ServerV2node $server) use ($parentServers, $manualOverrideMap, &$occupiedAutoMap) {
+        return $servers->map(function (ServerV2node $server) use ($parentServers, $manualOverrideMap, $listenProcessMap, &$occupiedAutoMap) {
             $listenHost = '0.0.0.0';
 
             $listenPort = (int) $server->port;
@@ -746,9 +749,13 @@ class MachineController extends Controller
             }
 
             $listenKey = strtolower($listenHost) . ':' . $listenPort;
-            $protocols = array_values(array_filter($protocols, function ($protocol) use ($listenKey, &$occupiedAutoMap) {
+            $protocols = array_values(array_filter($protocols, function ($protocol) use ($listenKey, $listenPort, $listenProcessMap, &$occupiedAutoMap) {
                 $protocol = strtolower(trim((string) $protocol));
-                if ($protocol === '' || isset($occupiedAutoMap[$listenKey][$protocol])) {
+                if (
+                    $protocol === '' ||
+                    isset($occupiedAutoMap[$listenKey][$protocol]) ||
+                    $this->isPortHeldByExternalProcess($listenProcessMap, $protocol, $listenPort)
+                ) {
                     return false;
                 }
                 $occupiedAutoMap[$listenKey][$protocol] = true;
@@ -771,11 +778,12 @@ class MachineController extends Controller
         })->filter()->values()->all();
     }
 
-    private function filterDeployableMachineV2nodeServers($servers)
+    private function filterDeployableMachineV2nodeServers($servers, array $status = [])
     {
         $occupied = [];
+        $listenProcessMap = $this->buildListenProcessMap($status);
 
-        return $servers->filter(function (ServerV2node $server) use (&$occupied) {
+        return $servers->filter(function (ServerV2node $server) use (&$occupied, $listenProcessMap) {
             $port = (int) $server->server_port;
             if ($port < 1 || $port > 65535) {
                 return false;
@@ -795,6 +803,9 @@ class MachineController extends Controller
                 if (isset($occupied[$port][$protocol])) {
                     continue;
                 }
+                if ($this->isPortHeldByExternalProcess($listenProcessMap, $protocol, $port)) {
+                    continue;
+                }
                 $availableProtocols[] = $protocol;
             }
 
@@ -808,6 +819,84 @@ class MachineController extends Controller
 
             return true;
         })->values();
+    }
+
+    private function filterDeployableRelayRules(array $rules, array $status = []): array
+    {
+        $listenProcessMap = $this->buildListenProcessMap($status);
+
+        return array_values(array_filter(array_map(function ($rule) use ($listenProcessMap) {
+            if (!is_array($rule)) {
+                return null;
+            }
+
+            $listenPort = (int) ($rule['listen_port'] ?? $rule['listenPort'] ?? 0);
+            if ($listenPort < 1 || $listenPort > 65535) {
+                return null;
+            }
+
+            $protocols = $this->normalizeRelayRuleProtocols($rule);
+            $protocols = array_values(array_filter($protocols, function ($protocol) use ($listenProcessMap, $listenPort) {
+                $protocol = strtolower(trim((string) $protocol));
+                return in_array($protocol, ['tcp', 'udp'], true)
+                    && !$this->isPortHeldByExternalProcess($listenProcessMap, $protocol, $listenPort);
+            }));
+            if (!$protocols) {
+                return null;
+            }
+
+            $rule['protocols'] = $protocols;
+            return $rule;
+        }, $rules)));
+    }
+
+    private function buildListenProcessMap(array $status): array
+    {
+        $raw = trim((string) ($status['listen_processes'] ?? ''));
+        if ($raw === '') {
+            return [];
+        }
+
+        $map = [];
+        foreach (preg_split('/\s*,\s*/', $raw) ?: [] as $item) {
+            $parts = explode(':', trim((string) $item), 4);
+            if (count($parts) < 3) {
+                continue;
+            }
+
+            $protocol = strtolower(trim((string) $parts[0]));
+            $port = (int) ($parts[1] ?? 0);
+            $process = strtolower(trim((string) ($parts[2] ?? '')));
+            $pid = trim((string) ($parts[3] ?? ''));
+            if (!in_array($protocol, ['tcp', 'udp'], true) || $port < 1 || $port > 65535) {
+                continue;
+            }
+
+            $map[$protocol . ':' . $port][] = [
+                'process' => $process !== '' ? $process : 'unknown',
+                'pid' => $pid,
+            ];
+        }
+
+        return $map;
+    }
+
+    private function isManagedListenProcess(string $process): bool
+    {
+        $process = strtolower(trim($process));
+        return $process === 'v2node' || $process === 'gost' || str_starts_with($process, 'gost-');
+    }
+
+    private function isPortHeldByExternalProcess(array $listenProcessMap, string $protocol, int $port): bool
+    {
+        $items = $listenProcessMap[strtolower($protocol) . ':' . $port] ?? [];
+        foreach ($items as $item) {
+            if (!$this->isManagedListenProcess((string) ($item['process'] ?? ''))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function resolveRelayTargetHostFromServer(ServerV2node $server, $parentServers): string
@@ -1041,6 +1130,7 @@ class MachineController extends Controller
             'gost_status',
             'gost_version',
             'listen_ports',
+            'listen_processes',
             'virtualization',
             'tcp_congestion_control',
             'bbr_status',
@@ -1216,7 +1306,7 @@ class MachineController extends Controller
             ->orderBy('sort', 'ASC')
             ->orderBy('id', 'ASC')
             ->get();
-        $machineServers = $this->filterDeployableMachineV2nodeServers($machineServers);
+        $machineServers = $this->filterDeployableMachineV2nodeServers($machineServers, $status);
 
         $nodes = $machineServers
             ->map(function (ServerV2node $server) use ($apiHost, $apiKey) {
@@ -1233,7 +1323,7 @@ class MachineController extends Controller
         $enableBbrToken = $this->probeCache()->get('v2node_probe_enable_bbr:' . $machine->id);
         $ddnsHost = $this->resolveDdnsHost($machine);
         $currentIp = trim((string) ($status['primary_ip'] ?? $status['remote_ip'] ?? $status['ip'] ?? ''));
-        $manualRelayRules = $this->buildMachineRelayRules($machine);
+        $manualRelayRules = $this->filterDeployableRelayRules($this->buildMachineRelayRules($machine), $status);
 
         return response()->json([
             'data' => $nodes,
