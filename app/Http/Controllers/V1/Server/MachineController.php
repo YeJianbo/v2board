@@ -697,7 +697,7 @@ class MachineController extends Controller
         return ['tcp'];
     }
 
-    private function buildProbeRelayRules(Machine $machine): array
+    private function buildProbeRelayRules(Machine $machine, ?array $manualRelayRules = null): array
     {
         $servers = ServerV2node::query()
             ->where('relay_machine_id', $machine->id)
@@ -714,7 +714,8 @@ class MachineController extends Controller
             ->whereIn('id', $servers->pluck('parent_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all())
             ->get()
             ->keyBy('id');
-        $manualOverrideMap = $this->buildRelayRuleOverrideMap($this->buildMachineRelayRules($machine));
+        $manualRelayRules = $manualRelayRules ?? $this->buildMachineRelayRules($machine);
+        $manualOverrideMap = $this->buildRelayRuleOverrideMap($manualRelayRules);
 
         return $servers->map(function (ServerV2node $server) use ($parentServers, $manualOverrideMap) {
             $listenHost = '0.0.0.0';
@@ -1178,6 +1179,7 @@ class MachineController extends Controller
         $enableBbrToken = $this->probeCache()->get('v2node_probe_enable_bbr:' . $machine->id);
         $ddnsHost = $this->resolveDdnsHost($machine);
         $currentIp = trim((string) ($status['primary_ip'] ?? $status['remote_ip'] ?? $status['ip'] ?? ''));
+        $manualRelayRules = $this->buildMachineRelayRules($machine);
 
         return response()->json([
             'data' => $nodes,
@@ -1187,8 +1189,8 @@ class MachineController extends Controller
                 'firewall_rules' => $this->buildProbeFirewallRules($machine, $machineServers),
                 'relay' => [
                     'rules' => array_values(array_merge(
-                        $this->buildMachineRelayRules($machine),
-                        $this->buildProbeRelayRules($machine)
+                        $manualRelayRules,
+                        $this->buildProbeRelayRules($machine, $manualRelayRules)
                     )),
                 ],
                 'ddns' => [
