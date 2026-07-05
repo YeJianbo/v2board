@@ -879,14 +879,15 @@ class MachineController extends Controller
         return array_values(array_unique($protocols));
     }
 
-    private function buildProbeFirewallRules(Machine $machine): array
+    private function buildProbeFirewallRules(Machine $machine, $servers = null): array
     {
-        return ServerV2node::query()
+        $servers = $servers ?: ServerV2node::query()
             ->where('machine_id', $machine->id)
             ->orderBy('sort', 'ASC')
             ->orderBy('id', 'ASC')
-            ->get()
-            ->map(function (ServerV2node $server) {
+            ->get();
+
+        return $servers->map(function (ServerV2node $server) {
                 $port = (int) $server->server_port;
                 if ($port < 1 || $port > 65535) {
                     return null;
@@ -1156,10 +1157,13 @@ class MachineController extends Controller
 
         $apiKey = (string) $this->panelSetting('server_token', '');
 
-        $nodes = ServerV2node::query()
+        $machineServers = ServerV2node::query()
             ->where('machine_id', $machine->id)
             ->orderBy('sort', 'ASC')
-            ->get()
+            ->orderBy('id', 'ASC')
+            ->get();
+
+        $nodes = $machineServers
             ->map(function (ServerV2node $server) use ($apiHost, $apiKey) {
                 return [
                     'ApiHost' => $apiHost,
@@ -1180,7 +1184,7 @@ class MachineController extends Controller
             'restart_v2node_token' => $restartToken ?: '',
             'enable_bbr_token' => $enableBbrToken ?: '',
             'probe' => [
-                'firewall_rules' => $this->buildProbeFirewallRules($machine),
+                'firewall_rules' => $this->buildProbeFirewallRules($machine, $machineServers),
                 'relay' => [
                     'rules' => array_values(array_merge(
                         $this->buildMachineRelayRules($machine),
