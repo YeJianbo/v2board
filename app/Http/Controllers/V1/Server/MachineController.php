@@ -918,16 +918,19 @@ class MachineController extends Controller
         $map = [];
 
         foreach ($rules as $rule) {
-            $listenHost = trim((string) ($rule['listen_host'] ?? $rule['listenHost'] ?? $rule['local_host'] ?? $rule['localHost'] ?? '0.0.0.0'));
-            if ($listenHost === '') {
-                $listenHost = '0.0.0.0';
+            if (!is_array($rule)) {
+                continue;
             }
+
+            $listenHost = $this->normalizeRelayListenHostForOverride(
+                $rule['listen_host'] ?? $rule['listenHost'] ?? $rule['local_host'] ?? $rule['localHost'] ?? '0.0.0.0'
+            );
             $listenPort = (int) ($rule['listen_port'] ?? $rule['listenPort'] ?? $rule['local_port'] ?? $rule['localPort'] ?? 0);
             if ($listenPort < 1 || $listenPort > 65535) {
                 continue;
             }
 
-            $key = strtolower($listenHost) . ':' . $listenPort;
+            $key = $listenHost . ':' . $listenPort;
             if (!isset($map[$key])) {
                 $map[$key] = [];
             }
@@ -944,10 +947,23 @@ class MachineController extends Controller
         return $map;
     }
 
+    private function normalizeRelayListenHostForOverride($listenHost): string
+    {
+        $host = strtolower(trim((string) $listenHost));
+        $host = trim($host, " \t\n\r\0\x0B[]");
+
+        if ($host === '' || in_array($host, ['*', '0.0.0.0', '::', '::0', '::/0', ':::'], true)) {
+            return '*';
+        }
+
+        return $host;
+    }
+
     private function filterAutoRelayProtocolsByManualOverrides(string $listenHost, int $listenPort, array $protocols, array $overrideMap): array
     {
-        $key = strtolower(trim($listenHost) !== '' ? trim($listenHost) : '0.0.0.0') . ':' . $listenPort;
-        $overridden = $overrideMap[$key] ?? [];
+        $specificKey = $this->normalizeRelayListenHostForOverride($listenHost) . ':' . $listenPort;
+        $wildcardKey = '*:' . $listenPort;
+        $overridden = array_merge($overrideMap[$wildcardKey] ?? [], $overrideMap[$specificKey] ?? []);
 
         return array_values(array_filter(array_map(function ($protocol) {
             return strtolower(trim((string) $protocol));
