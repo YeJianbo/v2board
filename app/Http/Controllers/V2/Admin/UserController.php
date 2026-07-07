@@ -7,7 +7,16 @@ use App\Http\Requests\Admin\UserGenerate;
 use App\Http\Requests\Admin\UserSendMail;
 use App\Http\Requests\Admin\UserUpdate;
 use App\Jobs\SendEmailJob;
+use App\Models\CommissionLog;
+use App\Models\InviteCode;
+use App\Models\Order;
 use App\Models\Plan;
+use App\Models\StatUser;
+use App\Models\StatUserServer;
+use App\Models\StatUserServerHour;
+use App\Models\StatUserServerMinute;
+use App\Models\Ticket;
+use App\Models\TicketMessage;
 use App\Models\User;
 use App\Services\AuthService;
 use App\Services\NodeSyncService;
@@ -742,10 +751,31 @@ class UserController extends Controller
 
         try {
             DB::beginTransaction();
-            $user->orders()->delete();
-            $user->codes()->delete();
-            $user->stat()->delete();
-            $user->tickets()->delete();
+
+            (new AuthService($user))->removeAllSession();
+
+            Order::where('user_id', $user->id)
+                ->orWhere('invite_user_id', $user->id)
+                ->delete();
+
+            CommissionLog::where('user_id', $user->id)
+                ->orWhere('invite_user_id', $user->id)
+                ->delete();
+
+            InviteCode::where('user_id', $user->id)->delete();
+
+            $ticketIds = Ticket::where('user_id', $user->id)->pluck('id');
+            if ($ticketIds->isNotEmpty()) {
+                TicketMessage::whereIn('ticket_id', $ticketIds)->delete();
+            }
+            Ticket::where('user_id', $user->id)->delete();
+
+            StatUser::where('user_id', $user->id)->delete();
+            StatUserServer::where('user_id', $user->id)->delete();
+            StatUserServerHour::where('user_id', $user->id)->delete();
+            StatUserServerMinute::where('user_id', $user->id)->delete();
+
+            User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
             $user->delete();
             DB::commit();
 
