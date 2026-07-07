@@ -159,12 +159,17 @@ class Stash
 
         if ($server['tls']) {
             $array['tls'] = true;
-            if ($server['tlsSettings']) {
-                $tlsSettings = $server['tlsSettings'];
+            $tlsSettings = $server['tlsSettings'] ?? ($server['tls_settings'] ?? []);
+            if ($tlsSettings) {
                 if (isset($tlsSettings['allowInsecure']) && !empty($tlsSettings['allowInsecure']))
                     $array['skip-cert-verify'] = ($tlsSettings['allowInsecure'] ? true : false);
                 if (isset($tlsSettings['serverName']) && !empty($tlsSettings['serverName']))
                     $array['servername'] = $tlsSettings['serverName'];
+                if (isset($tlsSettings['allow_insecure']))
+                    $array['skip-cert-verify'] = ((int) $tlsSettings['allow_insecure'] === 1);
+                if (isset($tlsSettings['server_name']) && !empty($tlsSettings['server_name']))
+                    $array['servername'] = $tlsSettings['server_name'];
+                $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
             }
         }
         if ($server['network'] === 'tcp') {
@@ -217,8 +222,8 @@ class Stash
 
         if ($server['tls']) {
             $array['tls'] = true;
-            if ($server['tls_settings']) {
-                $tlsSettings = $server['tls_settings'];
+            $tlsSettings = $server['tls_settings'] ?? [];
+            if ($tlsSettings) {
                 if (isset($tlsSettings['server_name']) && !empty($tlsSettings['server_name']))
                    $array['servername'] = $tlsSettings['server_name'];
                 if ($server['tls'] == 2) {
@@ -228,6 +233,9 @@ class Stash
                 }
                 $array['skip-cert-verify'] = ($tlsSettings['allow_insecure'] ?? 0) == 1 ? true : false;
                 $array['client-fingerprint'] = $tlsSettings['fingerprint'] ?? null;
+            }
+            if ((int) $server['tls'] !== 2) {
+                $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
             }
         }
 
@@ -294,6 +302,8 @@ class Stash
         };
         if (!empty($server['server_name'])) $array['sni'] = $server['server_name'];
         if (!empty($server['allow_insecure'])) $array['skip-cert-verify'] = ($server['allow_insecure'] ? true : false);
+        $tlsSettings = $server['tls_settings'] ?? [];
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         return $array;
     }
 
@@ -317,6 +327,8 @@ class Stash
         if (isset($server['server_name'])) {
             $array['sni'] = $server['server_name'];
         }
+        $tlsSettings = $server['tls_settings'] ?? [];
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
 
         return $array;
     }
@@ -380,6 +392,7 @@ class Stash
             'sni' => $sni,
             'udp' => true,
         ];
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         $parts = explode(",", $server['port']);
         $firstPart = $parts[0];
         if (strpos($firstPart, '-') !== false) {
@@ -415,6 +428,7 @@ class Stash
             $array['client-fingerprint'] = !empty($tlsSettings['fingerprint']) ? $tlsSettings['fingerprint'] : 'chrome';
             $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
             $array['skip-cert-verify'] = Helper::shouldSkipCertVerify($server, $tlsSettings);
+            $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         }
         return $array; 
     }

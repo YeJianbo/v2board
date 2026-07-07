@@ -22,6 +22,47 @@ class Helper
         return $certMode === 'self';
     }
 
+    public static function resolveCertificateFingerprint(array $tlsSettings = []): ?string
+    {
+        $fingerprint = trim((string) ($tlsSettings['certificate_fingerprint'] ?? ''));
+        return $fingerprint !== '' ? $fingerprint : null;
+    }
+
+    public static function appendCertificateFingerprint(array $proxy, array $tlsSettings = []): array
+    {
+        $fingerprint = self::resolveCertificateFingerprint($tlsSettings);
+        if ($fingerprint !== null) {
+            $proxy['fingerprint'] = $fingerprint;
+        }
+
+        return $proxy;
+    }
+
+    public static function resolveCertificatePublicKeySha256(array $tlsSettings = []): array
+    {
+        $pins = $tlsSettings['certificate_public_key_sha256'] ?? [];
+
+        if (!is_array($pins)) {
+            $pins = preg_split('/\r\n|\r|\n/', (string) $pins) ?: [];
+        }
+
+        $pins = array_values(array_filter(array_map(function ($pin) {
+            return trim((string) $pin);
+        }, $pins)));
+
+        return $pins;
+    }
+
+    public static function appendCertificatePublicKeySha256(array $tlsConfig, array $tlsSettings = []): array
+    {
+        $pins = self::resolveCertificatePublicKeySha256($tlsSettings);
+        if (!empty($pins)) {
+            $tlsConfig['certificate_public_key_sha256'] = $pins;
+        }
+
+        return $tlsConfig;
+    }
+
     public static function uuidToBase64($uuid, $length)
     {
         return base64_encode(substr($uuid, 0, $length));

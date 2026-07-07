@@ -9,11 +9,25 @@ class Singbox
     private $servers;
     private $user;
     private $config;
+    private $supportsCertificatePublicKeySha256 = false;
 
     public function __construct($user, $servers, array $options = null)
     {
         $this->user = $user;
         $this->servers = $servers;
+        $this->supportsCertificatePublicKeySha256 = (bool) ($options['supports_certificate_public_key_sha256'] ?? false);
+    }
+
+    private function appendCertificatePublicKeySha256(array $tlsConfig, array $tlsSettings = []): array
+    {
+        if (!$this->supportsCertificatePublicKeySha256) {
+            if (!empty(Helper::resolveCertificatePublicKeySha256($tlsSettings))) {
+                $tlsConfig['insecure'] = true;
+            }
+            return $tlsConfig;
+        }
+
+        return Helper::appendCertificatePublicKeySha256($tlsConfig, $tlsSettings);
     }
 
     public function handle()
@@ -174,6 +188,9 @@ class Singbox
                     ];
                 }
             }
+            if ((int) $server['tls'] !== 2) {
+                $tlsConfig = $this->appendCertificatePublicKeySha256($tlsConfig, $tlsSettings);
+            }
             $array['tls'] = $tlsConfig;
         }
         if ($server['network'] === 'tcp') {
@@ -247,6 +264,7 @@ class Singbox
                     }
                 }
             }
+            $tlsConfig = $this->appendCertificatePublicKeySha256($tlsConfig, $tlsSettings);
             $array['tls'] = $tlsConfig;
         }
 
@@ -306,6 +324,7 @@ class Singbox
                 ];
             }
         }
+        $tlsConfig = $this->appendCertificatePublicKeySha256($tlsConfig, $tlsSettings);
         $array['tls'] = $tlsConfig;
 
         if(isset($server['network']) && in_array($server['network'], ["grpc", "ws"])){
@@ -352,6 +371,7 @@ class Singbox
             'disable_sni' => $server['disable_sni'] ? true : false,
         ];
         $array['tls']['server_name'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
+        $array['tls'] = $this->appendCertificatePublicKeySha256($array['tls'], $tlsSettings);
 
         return $array;
     }
@@ -367,17 +387,17 @@ class Singbox
         $array['domain_resolver'] = 'local';
 
         $tlsSettings = $server['tls_settings'] ?? [];
+        $isReality = (int) ($server['tls'] ?? 0) === 2;
         $tlsConfig = [
             'enabled' => true,
-            'insecure' => ($server['insecure'] ?? ($tlsSettings['allow_insecure'] ?? 0)) == 1 ? true : false,
+            'insecure' => $isReality || (($server['insecure'] ?? ($tlsSettings['allow_insecure'] ?? 0)) == 1),
             'alpn' => [
-                'h2',
                 'http/1.1',
             ],
             'server_name' => $server['server_name'] ?? ($tlsSettings['server_name'] ?? '')
         ];
         if ($server['tls_settings']) {
-            if ($server['tls'] == 2) {
+            if ($isReality) {
                 $tlsConfig['reality'] = [
                     'enabled' => true,
                     'public_key' => $tlsSettings['public_key'],
@@ -389,6 +409,7 @@ class Singbox
                 "fingerprint" => $tlsSettings['fingerprint'] ?? 'chrome'
             ];
         }
+        $tlsConfig = $this->appendCertificatePublicKeySha256($tlsConfig, $tlsSettings);
         $array['tls'] = $tlsConfig;
 
         if ($server['network'] === 'tcp') {
@@ -501,6 +522,7 @@ class Singbox
             'tag' => $server['name'],
             'type' => 'hysteria2'
         ];
+        $array['tls'] = $this->appendCertificatePublicKeySha256($array['tls'], $tlsSettings);
         if (isset($server['obfs'])) {
             $array['obfs']['type'] = $server['obfs'];
             $array['obfs']['password'] = $server['obfs_password'];

@@ -37,13 +37,21 @@ class ClientController extends Controller
                         }
                     }
                 }
-                if (strpos($flag, 'sing') !== false) {
+                $isNekoBox = strpos($flag, 'neko') !== false || strpos($flag, 'nb4a') !== false;
+                if (strpos($flag, 'sing') !== false || $isNekoBox) {
                     $version = null;
+                    $isBunCloudPinnedNekoBox = $isNekoBox && (
+                        strpos($flag, 'buncloudpin') !== false ||
+                        strpos($flag, 'buncloud-pin') !== false ||
+                        strpos($flag, 'cert-pin') !== false
+                    );
                     if (preg_match('/sing-box\s+([0-9.]+)/i', $flag, $matches)) {
                         $version = $matches[1];
                     }
-                    if (!is_null($version) && $version >= '1.12.0') {
-                        $class = new Singbox($user, $servers);
+                    if ($isNekoBox || (!is_null($version) && $version >= '1.12.0')) {
+                        $class = new Singbox($user, $servers, [
+                            'supports_certificate_public_key_sha256' => $isBunCloudPinnedNekoBox || (!$isNekoBox && !is_null($version) && version_compare($version, '1.13.0', '>=')),
+                        ]);
                     } else {
                         $class = new SingboxOld($user, $servers);
                     }

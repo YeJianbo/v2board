@@ -7,6 +7,8 @@ use Symfony\Component\Yaml\Yaml;
 
 class ClashVerge
 {
+    private const CLASH_META_FOR_ANDROID_ANYTLS_MIN_VERSION = '2.11.8';
+    private const MIHOMO_ANYTLS_MIN_VERSION = '1.19.3';
     private const HEALTHCHECK_URL = 'http://cp.cloudflare.com/generate_204';
     private const GLOBAL_AUTO_NAME = '♻️ 自动选择';
     private const REGION_UNKNOWN = 'OTHER';
@@ -129,6 +131,7 @@ class ClashVerge
         $proxy = [];
         $proxies = [];
         $regionProxyMap = [];
+        $clientInfo = $this->getClientInfo();
 
         foreach ($servers as $item) {
             // Singbox-style inline adaptation: unwrap v2node
@@ -163,6 +166,9 @@ class ClashVerge
                     $handled = true;
                     break;
                 case 'anytls':
+                    if (!$this->shouldBuildAnyTLS($item, $clientInfo)) {
+                        break;
+                    }
                     $proxy[] = self::buildAnyTLS($user['uuid'], $item);
                     $proxies[] = $item['name'];
                     $handled = true;
@@ -221,6 +227,7 @@ class ClashVerge
         }
         unset($group);
         $config['proxy-groups'] = array_values($config['proxy-groups']);
+        $config = $this->externalizeRulesForProviders($config);
         // Force the current subscription domain to be a direct rule
         //$subsDomain = $_SERVER['HTTP_HOST'];
         //if ($subsDomain) {
@@ -229,7 +236,183 @@ class ClashVerge
 
         $yaml = Yaml::dump($config, 2, 4, Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE);
         $yaml = str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
-        return $yaml;
+        return response($yaml, 200, [
+            'Content-Type' => 'text/yaml; charset=utf-8',
+            'Content-Length' => strlen($yaml),
+            'Cache-Control' => 'no-store, no-transform',
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    private function getClientInfo(): array
+    {
+        $flag = strtolower((string)(request()->input('flag') ?? ($_SERVER['HTTP_USER_AGENT'] ?? '')));
+        $clientName = null;
+        $clientVersion = null;
+
+        foreach (['clashmetaforandroid', 'verge', 'flclash', 'nyanpasu', 'mihomo', 'meta', 'clash'] as $name) {
+            if (strpos($flag, $name) !== false) {
+                $clientName = $name;
+                $pattern = '/' . preg_quote($name, '/') . '[\/\s\-_]+v?(\d+(?:\.\d+){0,3})/i';
+                if (preg_match($pattern, $flag, $matches)) {
+                    $clientVersion = $matches[1];
+                }
+                break;
+            }
+        }
+
+        if (!$clientVersion && preg_match('/(?:\/|\s|_|-)v?(\d+(?:\.\d+){1,3})/i', $flag, $matches)) {
+            $clientVersion = $matches[1];
+        }
+
+        return [
+            'flag' => $flag,
+            'name' => $clientName,
+            'version' => $clientVersion,
+        ];
+    }
+
+    private function shouldBuildAnyTLS(array $server, array $clientInfo): bool
+    {
+        if ($this->isAnyTLSReality($server)) {
+            return false;
+        }
+
+        if (($clientInfo['name'] ?? null) === 'clashmetaforandroid') {
+            return !empty($clientInfo['version'])
+                && version_compare($clientInfo['version'], self::CLASH_META_FOR_ANDROID_ANYTLS_MIN_VERSION, '>=');
+        }
+
+        if (in_array($clientInfo['name'] ?? null, ['meta', 'mihomo'], true) && !empty($clientInfo['version'])) {
+            return version_compare($clientInfo['version'], self::MIHOMO_ANYTLS_MIN_VERSION, '>=');
+        }
+
+        return true;
+    }
+
+    private function isAnyTLSReality(array $server): bool
+    {
+        if (isset($server['tls']) && (int)$server['tls'] === 2) {
+            return true;
+        }
+
+        $tlsSettings = $server['tls_settings'] ?? [];
+        return is_array($tlsSettings) && (
+            !empty($tlsSettings['public_key']) ||
+            !empty($tlsSettings['short_id'])
+        );
+    }
+
+    private function externalizeRulesForProviders(array $config): array
+    {
+        $providerMap = $this->getRuleProviderMap();
+        $providerBaseUrl = rtrim(config('v2board.app_url') ?: request()->getSchemeAndHttpHost(), '/')
+            . '/rules/clash/';
+        $providers = is_array($config['rule-providers'] ?? null) ? $config['rule-providers'] : [];
+        $rules = [];
+        $usedProviders = [];
+        $deferredMatchRules = [];
+
+        foreach (($config['rules'] ?? []) as $rule) {
+            if (!is_string($rule)) {
+                continue;
+            }
+            $rule = trim($rule);
+            if ($rule === '' || strpos($rule, '#') === 0) {
+                continue;
+            }
+
+            $parts = array_map('trim', explode(',', $rule));
+            $type = strtoupper($parts[0] ?? '');
+            if ($type === 'MATCH') {
+                $deferredMatchRules[] = $rule;
+                continue;
+            }
+            if ($type === 'RULE-SET') {
+                $rules[] = $rule;
+                continue;
+            }
+
+            $targetIndex = count($parts) - 1;
+            if ($targetIndex > 1 && strtolower($parts[$targetIndex]) === 'no-resolve') {
+                $targetIndex--;
+            }
+            $target = $parts[$targetIndex] ?? null;
+            if (!$target || !isset($providerMap[$target])) {
+                $rules[] = $rule;
+                continue;
+            }
+
+            $provider = $providerMap[$target];
+            $providerName = $provider['name'];
+            if (empty($usedProviders[$providerName])) {
+                $rules[] = "RULE-SET,{$providerName},{$target}";
+                $usedProviders[$providerName] = true;
+            }
+            if (!isset($providers[$providerName])) {
+                $providers[$providerName] = [
+                    'type' => 'http',
+                    'behavior' => 'classical',
+                    'url' => $providerBaseUrl . $provider['file'],
+                    'path' => './BunCloud/' . $provider['file'],
+                    'interval' => 86400,
+                ];
+            }
+        }
+
+        if (!empty($usedProviders['BunCloudDirect'])) {
+            $rules[] = 'GEOIP,CN,🎯 全球直连,no-resolve';
+        }
+
+        $config['rule-providers'] = $providers;
+        $config['rules'] = array_values(array_unique(array_merge(
+            $this->getSubscriptionDirectRules(),
+            $rules,
+            $deferredMatchRules
+        )));
+        return $config;
+    }
+
+    private function getSubscriptionDirectRules(): array
+    {
+        $hosts = [];
+        foreach ([$_SERVER['HTTP_HOST'] ?? null, parse_url(config('v2board.app_url'), PHP_URL_HOST)] as $host) {
+            $host = strtolower(trim((string)$host));
+            if ($host !== '') {
+                $hosts[$host] = true;
+            }
+        }
+
+        return array_map(function ($host) {
+            return "DOMAIN,{$host},DIRECT";
+        }, array_keys($hosts));
+    }
+
+    private function getRuleProviderMap(): array
+    {
+        return [
+            '🚀 节点选择' => ['name' => 'BunCloudProxy', 'file' => 'proxy.yaml'],
+            '🌍 国外媒体' => ['name' => 'BunCloudMedia', 'file' => 'media.yaml'],
+            '💡 OpenAI' => ['name' => 'BunCloudOpenAI', 'file' => 'openai.yaml'],
+            '▶️ YouTube' => ['name' => 'BunCloudYouTube', 'file' => 'youtube.yaml'],
+            '🔍 Google' => ['name' => 'BunCloudGoogle', 'file' => 'google.yaml'],
+            '📸 Facebook' => ['name' => 'BunCloudFacebook', 'file' => 'facebook.yaml'],
+            '𝕏 Twitter' => ['name' => 'BunCloudTwitter', 'file' => 'twitter.yaml'],
+            'ᯤ Spotify' => ['name' => 'BunCloudSpotify', 'file' => 'spotify.yaml'],
+            '📢 谷歌FCM' => ['name' => 'BunCloudGoogleFCM', 'file' => 'google-fcm.yaml'],
+            '📲 电报信息' => ['name' => 'BunCloudTelegram', 'file' => 'telegram.yaml'],
+            'Ⓜ️ 微软服务' => ['name' => 'BunCloudMicrosoft', 'file' => 'microsoft.yaml'],
+            '🍎 苹果服务' => ['name' => 'BunCloudApple', 'file' => 'apple.yaml'],
+            '🅱 哔哩哔哩' => ['name' => 'BunCloudBilibili', 'file' => 'bilibili.yaml'],
+            '💬 微信消息' => ['name' => 'BunCloudWeChat', 'file' => 'wechat.yaml'],
+            '🧑‍💻 GitHub' => ['name' => 'BunCloudGitHub', 'file' => 'github.yaml'],
+            '🧰 开发环境' => ['name' => 'BunCloudDev', 'file' => 'dev.yaml'],
+            '🐻 BunCloud' => ['name' => 'BunCloudSite', 'file' => 'buncloud.yaml'],
+            '🎯 全球直连' => ['name' => 'BunCloudDirect', 'file' => 'direct.yaml'],
+            '🌐 IPv6' => ['name' => 'BunCloudIPv6', 'file' => 'ipv6.yaml'],
+            'REJECT' => ['name' => 'BunCloudReject', 'file' => 'reject.yaml'],
+            'DIRECT' => ['name' => 'BunCloudProcessDirect', 'file' => 'process-direct.yaml'],
+        ];
     }
 
     public static function buildShadowsocks($password, $server)
@@ -302,6 +485,7 @@ class ClashVerge
                     $array['skip-cert-verify'] = ($tlsSettings['allowInsecure'] ? true : false);
                 if (isset($tlsSettings['serverName']) && !empty($tlsSettings['serverName']))
                     $array['servername'] = $tlsSettings['serverName'];
+                $array = Helper::appendCertificateFingerprint($array, is_array($tlsSettings) ? $tlsSettings : []);
                 if (!empty($tlsSettings['ech'])) {
                     if ($tlsSettings['ech'] === 'cloudflare') {
                         $array['ech-opts'] = [
@@ -391,6 +575,9 @@ class ClashVerge
                         ];
                     }
                 }
+            }
+            if ((int) $server['tls'] !== 2) {
+                $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
             }
         }
 
@@ -495,6 +682,7 @@ class ClashVerge
                 ];
             }
         }
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         return $array;
     }
 
@@ -516,6 +704,7 @@ class ClashVerge
         $tlsSettings = $server['tls_settings'] ?? [];
         $array['skip-cert-verify'] = Helper::shouldSkipCertVerify($server, $tlsSettings);
         $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
 
         return $array;
     }
@@ -531,13 +720,13 @@ class ClashVerge
             'client-fingerprint' => 'chrome',
             'udp' => true,
             'alpn' => [
-                'h2',
                 'http/1.1',
             ],
         ];
         $tlsSettings = $server['tls_settings'] ?? [];
         $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
         $array['skip-cert-verify'] = Helper::shouldSkipCertVerify($server, $tlsSettings);
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         return $array;
     }
 
@@ -600,6 +789,7 @@ class ClashVerge
             'sni' => $sni,
             'udp' => true,
         ];
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         $parts = explode(",", $server['port']);
         $firstPart = $parts[0];
         if (strpos($firstPart, '-') !== false) {

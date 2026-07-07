@@ -7,6 +7,8 @@ use Symfony\Component\Yaml\Yaml;
 
 class ClashMeta
 {
+    private const CLASH_META_FOR_ANDROID_ANYTLS_MIN_VERSION = '2.11.8';
+    private const MIHOMO_ANYTLS_MIN_VERSION = '1.19.3';
     private const HEALTHCHECK_URL = 'http://cp.cloudflare.com/generate_204';
     private const GLOBAL_AUTO_NAME = '♻️ 自动选择';
     private const REGION_UNKNOWN = 'OTHER';
@@ -129,6 +131,7 @@ class ClashMeta
         $proxy = [];
         $proxies = [];
         $regionProxyMap = [];
+        $clientInfo = $this->getClientInfo();
 
         foreach ($servers as $item) {
             // Singbox-style inline adaptation: unwrap v2node
@@ -163,6 +166,9 @@ class ClashMeta
                     $handled = true;
                     break;
                 case 'anytls':
+                    if (!$this->shouldBuildAnyTLS($item, $clientInfo)) {
+                        break;
+                    }
                     $proxy[] = self::buildAnyTLS($user['uuid'], $item);
                     $proxies[] = $item['name'];
                     $handled = true;
@@ -221,6 +227,7 @@ class ClashMeta
         }
         unset($group);
         $config['proxy-groups'] = array_values($config['proxy-groups']);
+        $config = $this->externalizeRulesForProviders($config);
         // Force the current subscription domain to be a direct rule
         //$subsDomain = $_SERVER['HTTP_HOST'];
         //if ($subsDomain) {
@@ -229,7 +236,304 @@ class ClashMeta
 
         $yaml = Yaml::dump($config, 2, 4, Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE);
         $yaml = str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
-        return $yaml;
+        return response($yaml, 200, [
+            'Content-Type' => 'text/yaml; charset=utf-8',
+            'Content-Length' => strlen($yaml),
+            'Cache-Control' => 'no-store, no-transform',
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    private function getClientInfo(): array
+    {
+        $flag = strtolower((string)(request()->input('flag') ?? ($_SERVER['HTTP_USER_AGENT'] ?? '')));
+        $clientName = null;
+        $clientVersion = null;
+
+        foreach (['clashmetaforandroid', 'verge', 'flclash', 'nyanpasu', 'mihomo', 'meta', 'clash'] as $name) {
+            if (strpos($flag, $name) !== false) {
+                $clientName = $name;
+                $pattern = '/' . preg_quote($name, '/') . '[\/\s\-_]+v?(\d+(?:\.\d+){0,3})/i';
+                if (preg_match($pattern, $flag, $matches)) {
+                    $clientVersion = $matches[1];
+                }
+                break;
+            }
+        }
+
+        if (!$clientVersion && preg_match('/(?:\/|\s|_|-)v?(\d+(?:\.\d+){1,3})/i', $flag, $matches)) {
+            $clientVersion = $matches[1];
+        }
+
+        return [
+            'flag' => $flag,
+            'name' => $clientName,
+            'version' => $clientVersion,
+        ];
+    }
+
+    private function shouldBuildAnyTLS(array $server, array $clientInfo): bool
+    {
+        if ($this->isAnyTLSReality($server)) {
+            return false;
+        }
+
+        if (($clientInfo['name'] ?? null) === 'clashmetaforandroid') {
+            return !empty($clientInfo['version'])
+                && version_compare($clientInfo['version'], self::CLASH_META_FOR_ANDROID_ANYTLS_MIN_VERSION, '>=');
+        }
+
+        if (in_array($clientInfo['name'] ?? null, ['meta', 'mihomo'], true) && !empty($clientInfo['version'])) {
+            return version_compare($clientInfo['version'], self::MIHOMO_ANYTLS_MIN_VERSION, '>=');
+        }
+
+        return true;
+    }
+
+    private function isAnyTLSReality(array $server): bool
+    {
+        if (isset($server['tls']) && (int)$server['tls'] === 2) {
+            return true;
+        }
+
+        $tlsSettings = $server['tls_settings'] ?? [];
+        return is_array($tlsSettings) && (
+            !empty($tlsSettings['public_key']) ||
+            !empty($tlsSettings['short_id'])
+        );
+    }
+
+    private function externalizeRulesForProviders(array $config): array
+    {
+        $providerMap = $this->getRuleProviderMap();
+        $providerBaseUrl = rtrim(config('v2board.app_url') ?: request()->getSchemeAndHttpHost(), '/')
+            . '/rules/clash/';
+        $providers = is_array($config['rule-providers'] ?? null) ? $config['rule-providers'] : [];
+        $rules = [];
+        $usedProviders = [];
+        $deferredMatchRules = [];
+
+        foreach (($config['rules'] ?? []) as $rule) {
+            if (!is_string($rule)) {
+                continue;
+            }
+            $rule = trim($rule);
+            if ($rule === '' || strpos($rule, '#') === 0) {
+                continue;
+            }
+
+            $parts = array_map('trim', explode(',', $rule));
+            $type = strtoupper($parts[0] ?? '');
+            if ($type === 'MATCH') {
+                $deferredMatchRules[] = $rule;
+                continue;
+            }
+            if ($type === 'RULE-SET') {
+                $rules[] = $rule;
+                continue;
+            }
+
+            $targetIndex = count($parts) - 1;
+            if ($targetIndex > 1 && strtolower($parts[$targetIndex]) === 'no-resolve') {
+                $targetIndex--;
+            }
+            $target = $parts[$targetIndex] ?? null;
+            if (!$target || !isset($providerMap[$target])) {
+                $rules[] = $rule;
+                continue;
+            }
+
+            $provider = $providerMap[$target];
+            $providerName = $provider['name'];
+            if (empty($usedProviders[$providerName])) {
+                $rules[] = "RULE-SET,{$providerName},{$target}";
+                $usedProviders[$providerName] = true;
+            }
+            if (!isset($providers[$providerName])) {
+                $providers[$providerName] = [
+                    'type' => 'http',
+                    'behavior' => 'classical',
+                    'url' => $providerBaseUrl . $provider['file'],
+                    'path' => './BunCloud/' . $provider['file'],
+                    'interval' => 86400,
+                ];
+            }
+        }
+
+        if (!empty($usedProviders['BunCloudDirect'])) {
+            $rules[] = 'GEOIP,CN,🎯 全球直连,no-resolve';
+        }
+
+        $config['rule-providers'] = $providers;
+        $config['rules'] = array_values(array_unique(array_merge(
+            $this->getSubscriptionDirectRules(),
+            $rules,
+            $deferredMatchRules
+        )));
+        return $config;
+    }
+
+    private function getSubscriptionDirectRules(): array
+    {
+        $hosts = [];
+        foreach ([$_SERVER['HTTP_HOST'] ?? null, parse_url(config('v2board.app_url'), PHP_URL_HOST)] as $host) {
+            $host = strtolower(trim((string)$host));
+            if ($host !== '') {
+                $hosts[$host] = true;
+            }
+        }
+
+        return array_map(function ($host) {
+            return "DOMAIN,{$host},DIRECT";
+        }, array_keys($hosts));
+    }
+
+    private function getRuleProviderMap(): array
+    {
+        return [
+            '🚀 节点选择' => ['name' => 'BunCloudProxy', 'file' => 'proxy.yaml'],
+            '🌍 国外媒体' => ['name' => 'BunCloudMedia', 'file' => 'media.yaml'],
+            '💡 OpenAI' => ['name' => 'BunCloudOpenAI', 'file' => 'openai.yaml'],
+            '▶️ YouTube' => ['name' => 'BunCloudYouTube', 'file' => 'youtube.yaml'],
+            '🔍 Google' => ['name' => 'BunCloudGoogle', 'file' => 'google.yaml'],
+            '📸 Facebook' => ['name' => 'BunCloudFacebook', 'file' => 'facebook.yaml'],
+            '𝕏 Twitter' => ['name' => 'BunCloudTwitter', 'file' => 'twitter.yaml'],
+            'ᯤ Spotify' => ['name' => 'BunCloudSpotify', 'file' => 'spotify.yaml'],
+            '📢 谷歌FCM' => ['name' => 'BunCloudGoogleFCM', 'file' => 'google-fcm.yaml'],
+            '📲 电报信息' => ['name' => 'BunCloudTelegram', 'file' => 'telegram.yaml'],
+            'Ⓜ️ 微软服务' => ['name' => 'BunCloudMicrosoft', 'file' => 'microsoft.yaml'],
+            '🍎 苹果服务' => ['name' => 'BunCloudApple', 'file' => 'apple.yaml'],
+            '🅱 哔哩哔哩' => ['name' => 'BunCloudBilibili', 'file' => 'bilibili.yaml'],
+            '💬 微信消息' => ['name' => 'BunCloudWeChat', 'file' => 'wechat.yaml'],
+            '🧑‍💻 GitHub' => ['name' => 'BunCloudGitHub', 'file' => 'github.yaml'],
+            '🧰 开发环境' => ['name' => 'BunCloudDev', 'file' => 'dev.yaml'],
+            '🐻 BunCloud' => ['name' => 'BunCloudSite', 'file' => 'buncloud.yaml'],
+            '🎯 全球直连' => ['name' => 'BunCloudDirect', 'file' => 'direct.yaml'],
+            '🌐 IPv6' => ['name' => 'BunCloudIPv6', 'file' => 'ipv6.yaml'],
+            'REJECT' => ['name' => 'BunCloudReject', 'file' => 'reject.yaml'],
+            'DIRECT' => ['name' => 'BunCloudProcessDirect', 'file' => 'process-direct.yaml'],
+        ];
+    }
+
+    private function compactRulesForMobileMeta(array $config): array
+    {
+        $groups = [];
+        foreach (($config['proxy-groups'] ?? []) as $group) {
+            if (!empty($group['name'])) {
+                $groups[(string)$group['name']] = true;
+            }
+        }
+
+        $target = function (string $name, string $fallback = '🚀 节点选择') use ($groups): string {
+            if (isset($groups[$name])) {
+                return $name;
+            }
+            if (isset($groups[$fallback])) {
+                return $fallback;
+            }
+            return 'DIRECT';
+        };
+
+        $config['rules'] = [
+            'DOMAIN-SUFFIX,151376.xyz,' . $target('🐻 BunCloud'),
+            'DOMAIN-SUFFIX,buncloud.eu.org,' . $target('🐻 BunCloud'),
+
+            'DOMAIN-SUFFIX,openai.com,' . $target('💡 OpenAI'),
+            'DOMAIN-SUFFIX,chatgpt.com,' . $target('💡 OpenAI'),
+            'DOMAIN-SUFFIX,oaistatic.com,' . $target('💡 OpenAI'),
+            'DOMAIN-SUFFIX,oaiusercontent.com,' . $target('💡 OpenAI'),
+            'DOMAIN-SUFFIX,anthropic.com,' . $target('💡 OpenAI'),
+
+            'DOMAIN-KEYWORD,youtube,' . $target('▶️ YouTube'),
+            'DOMAIN-SUFFIX,youtu.be,' . $target('▶️ YouTube'),
+            'DOMAIN-SUFFIX,googlevideo.com,' . $target('▶️ YouTube'),
+            'DOMAIN-SUFFIX,ytimg.com,' . $target('▶️ YouTube'),
+            'DOMAIN-SUFFIX,gvt2.com,' . $target('▶️ YouTube'),
+
+            'DOMAIN-SUFFIX,google.com,' . $target('🔍 Google'),
+            'DOMAIN-SUFFIX,googleapis.com,' . $target('🔍 Google'),
+            'DOMAIN-SUFFIX,gstatic.com,' . $target('🔍 Google'),
+            'DOMAIN-SUFFIX,ggpht.com,' . $target('🔍 Google'),
+            'DOMAIN-SUFFIX,gmail.com,' . $target('🔍 Google'),
+            'DOMAIN-SUFFIX,googleusercontent.com,' . $target('🔍 Google'),
+            'DOMAIN-SUFFIX,xn--ngstr-lra8j.com,' . $target('🔍 Google'),
+            'DOMAIN-SUFFIX,services.googleapis.cn,' . $target('🔍 Google'),
+
+            'DOMAIN-SUFFIX,facebook.com,' . $target('📸 Facebook'),
+            'DOMAIN-SUFFIX,fbcdn.net,' . $target('📸 Facebook'),
+            'DOMAIN-SUFFIX,instagram.com,' . $target('📸 Facebook'),
+            'DOMAIN-SUFFIX,whatsapp.com,' . $target('📸 Facebook'),
+
+            'DOMAIN-SUFFIX,x.com,' . $target('𝕏 Twitter'),
+            'DOMAIN-SUFFIX,twitter.com,' . $target('𝕏 Twitter'),
+            'DOMAIN-SUFFIX,twimg.com,' . $target('𝕏 Twitter'),
+
+            'DOMAIN-SUFFIX,spotify.com,' . $target('ᯤ Spotify'),
+            'DOMAIN-SUFFIX,scdn.co,' . $target('ᯤ Spotify'),
+
+            'DOMAIN-SUFFIX,telegram.org,' . $target('📲 电报信息'),
+            'DOMAIN-SUFFIX,t.me,' . $target('📲 电报信息'),
+            'IP-CIDR,91.108.4.0/22,' . $target('📲 电报信息') . ',no-resolve',
+            'IP-CIDR,91.108.8.0/21,' . $target('📲 电报信息') . ',no-resolve',
+            'IP-CIDR,149.154.160.0/20,' . $target('📲 电报信息') . ',no-resolve',
+
+            'DOMAIN-SUFFIX,github.com,' . $target('🧑‍💻 GitHub'),
+            'DOMAIN-SUFFIX,githubusercontent.com,' . $target('🧑‍💻 GitHub'),
+            'DOMAIN-SUFFIX,githubassets.com,' . $target('🧑‍💻 GitHub'),
+
+            'DOMAIN-SUFFIX,python.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,pypi.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,pythonhosted.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,anaconda.com,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,anaconda.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,repo.anaconda.com,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,conda-forge.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,nodejs.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,npmjs.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,docker.com,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,docker.io,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,quay.io,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,golang.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,go.dev,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,rust-lang.org,' . $target('🧰 开发环境'),
+            'DOMAIN-SUFFIX,crates.io,' . $target('🧰 开发环境'),
+
+            'DOMAIN-SUFFIX,microsoft.com,' . $target('Ⓜ️ 微软服务'),
+            'DOMAIN-SUFFIX,windows.com,' . $target('Ⓜ️ 微软服务'),
+            'DOMAIN-SUFFIX,office.com,' . $target('Ⓜ️ 微软服务'),
+            'DOMAIN-SUFFIX,live.com,' . $target('Ⓜ️ 微软服务'),
+            'DOMAIN-SUFFIX,onedrive.com,' . $target('Ⓜ️ 微软服务'),
+
+            'DOMAIN-SUFFIX,apple.com,' . $target('🍎 苹果服务'),
+            'DOMAIN-SUFFIX,icloud.com,' . $target('🍎 苹果服务'),
+            'DOMAIN-SUFFIX,appstore.com,' . $target('🍎 苹果服务'),
+
+            'DOMAIN-SUFFIX,app-measurement.com,' . $target('📢 谷歌FCM'),
+            'DOMAIN,mtalk.google.com,' . $target('📢 谷歌FCM'),
+
+            'DOMAIN-SUFFIX,bilibili.com,' . $target('🅱 哔哩哔哩', '🎯 全球直连'),
+            'DOMAIN-SUFFIX,bilivideo.com,' . $target('🅱 哔哩哔哩', '🎯 全球直连'),
+            'DOMAIN-SUFFIX,acgvideo.com,' . $target('🅱 哔哩哔哩', '🎯 全球直连'),
+
+            'DOMAIN-KEYWORD,weixin,' . $target('💬 微信消息', '🎯 全球直连'),
+            'DOMAIN-KEYWORD,wechat,' . $target('💬 微信消息', '🎯 全球直连'),
+            'DOMAIN-SUFFIX,qq.com,' . $target('💬 微信消息', '🎯 全球直连'),
+
+            'DOMAIN-SUFFIX,cn,' . $target('🎯 全球直连'),
+            'DOMAIN-SUFFIX,中国,' . $target('🎯 全球直连'),
+            'DOMAIN-SUFFIX,local,' . $target('🎯 全球直连'),
+            'IP-CIDR,10.0.0.0/8,' . $target('🎯 全球直连') . ',no-resolve',
+            'IP-CIDR,172.16.0.0/12,' . $target('🎯 全球直连') . ',no-resolve',
+            'IP-CIDR,192.168.0.0/16,' . $target('🎯 全球直连') . ',no-resolve',
+            'IP-CIDR,127.0.0.0/8,' . $target('🎯 全球直连') . ',no-resolve',
+            'IP-CIDR6,fc00::/7,' . $target('🎯 全球直连') . ',no-resolve',
+            'IP-CIDR6,fe80::/10,' . $target('🎯 全球直连') . ',no-resolve',
+            'GEOIP,CN,' . $target('🎯 全球直连'),
+            'MATCH,' . $target('🐟 漏网之鱼'),
+        ];
+
+        unset($config['rule-providers']);
+        return $config;
     }
 
     public static function buildShadowsocks($password, $server)
@@ -302,6 +606,7 @@ class ClashMeta
                     $array['skip-cert-verify'] = ($tlsSettings['allowInsecure'] ? true : false);
                 if (isset($tlsSettings['serverName']) && !empty($tlsSettings['serverName']))
                     $array['servername'] = $tlsSettings['serverName'];
+                $array = Helper::appendCertificateFingerprint($array, is_array($tlsSettings) ? $tlsSettings : []);
                 if (!empty($tlsSettings['ech'])) {
                     if ($tlsSettings['ech'] === 'cloudflare') {
                         $array['ech-opts'] = [
@@ -391,6 +696,9 @@ class ClashMeta
                         ];
                     }
                 }
+            }
+            if ((int) $server['tls'] !== 2) {
+                $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
             }
         }
 
@@ -496,6 +804,7 @@ class ClashMeta
                 ];
             }
         }
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         return $array;
     }
 
@@ -517,6 +826,7 @@ class ClashMeta
         $tlsSettings = $server['tls_settings'] ?? [];
         $array['skip-cert-verify'] = Helper::shouldSkipCertVerify($server, $tlsSettings);
         $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
 
         return $array;
     }
@@ -532,13 +842,13 @@ class ClashMeta
             'client-fingerprint' => 'chrome',
             'udp' => true,
             'alpn' => [
-                'h2',
                 'http/1.1',
             ],
         ];
         $tlsSettings = $server['tls_settings'] ?? [];
         $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
         $array['skip-cert-verify'] = Helper::shouldSkipCertVerify($server, $tlsSettings);
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         return $array;
     }
 
@@ -601,6 +911,7 @@ class ClashMeta
             'sni' => $sni,
             'udp' => true,
         ];
+        $array = Helper::appendCertificateFingerprint($array, $tlsSettings);
         $parts = explode(",", $server['port']);
         $firstPart = $parts[0];
         if (strpos($firstPart, '-') !== false) {

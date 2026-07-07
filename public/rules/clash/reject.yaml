@@ -1,0 +1,7 @@
+payload:
+  - DOMAIN-KEYWORD,adobe
+  - DOMAIN-SUFFIX,adobe.com
+  - DOMAIN-SUFFIX,adobe.io
+  - PROCESS-NAME,AdobeGCClient.exe
+  - PROCESS-NAME,AdobeIPCBroker.exe
+  - DOMAIN-SUFFIX,sentry.io

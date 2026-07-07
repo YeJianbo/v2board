@@ -1,0 +1,12 @@
+payload:
+  - DOMAIN-KEYWORD,short.weixin.qq.com
+  - DOMAIN-SUFFIX,szshort.weixin.qq.com
+  - DOMAIN-SUFFIX,long.weixin.qq.com
+  - DOMAIN-SUFFIX,dns.weixin.qq.com.cn
+  - DOMAIN-SUFFIX,dns.weixin.qq.com
+  - DOMAIN-SUFFIX,extshort.weixin.qq.com
+  - DOMAIN-KEYWORD,long.wechat
+  - DOMAIN-KEYWORD,short.wechat
+  - DOMAIN-KEYWORD,long.weixin
+  - DOMAIN-KEYWORD,short.weixin
+  - DOMAIN-KEYWORD,dns.weixin
