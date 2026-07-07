@@ -57,7 +57,7 @@ class TicketController extends Controller
         }
         $ticket->messages->each(fn($msg) => $msg->setRelation('ticket', $ticket));
         $result = $ticket->toArray();
-        $result['user'] = UserController::transformUserData($ticket->user);
+        $result['user'] = $ticket->user ? UserController::transformUserData($ticket->user) : null;
 
         return $this->success($result);
     }
@@ -93,7 +93,7 @@ class TicketController extends Controller
         // 获取items然后映射转换
         $items = collect($tickets->items())->map(function ($ticket) {
             $ticketData = $ticket->toArray();
-            $ticketData['user'] = UserController::transformUserData($ticket->user);
+            $ticketData['user'] = $ticket->user ? UserController::transformUserData($ticket->user) : null;
             return $ticketData;
         })->all();
 
