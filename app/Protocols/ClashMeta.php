@@ -379,17 +379,10 @@ class ClashMeta
 
     private function getSubscriptionBunCloudRules(): array
     {
-        $hosts = [];
-        foreach ([$_SERVER['HTTP_HOST'] ?? null, parse_url(config('v2board.app_url'), PHP_URL_HOST)] as $host) {
-            $host = strtolower(trim((string)$host));
-            if ($host !== '') {
-                $hosts[$host] = true;
-            }
-        }
-
-        return array_map(function ($host) {
-            return "DOMAIN,{$host},🐻 BunCloud";
-        }, array_keys($hosts));
+        return [
+            'DOMAIN-SUFFIX,151376.xyz,🐻 BunCloud',
+            'DOMAIN-SUFFIX,buncloud.eu.org,🐻 BunCloud',
+        ];
     }
 
     private function getRuleProviderMap(): array
