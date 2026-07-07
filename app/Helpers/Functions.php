@@ -38,7 +38,7 @@ if (!function_exists('subscribe_template')) {
      */
     function subscribe_template(string $name): ?string
     {
-        return '';
+        return \App\Models\SubscribeTemplate::getContent($name);
     }
 }
 

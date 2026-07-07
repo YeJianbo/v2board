@@ -7,6 +7,7 @@ use App\Services\Plugin\PluginManager;
 use App\Services\Plugin\PluginConfigService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class PluginController extends Controller
@@ -151,10 +152,16 @@ class PluginController extends Controller
             'code' => 'required|string'
         ]);
 
-        $this->pluginManager->disable($request->input('code'));
-        return response()->json([
-            'message' => '插件禁用成功'
-        ]);
+        try {
+            $this->pluginManager->disable($request->input('code'));
+            return response()->json([
+                'message' => '插件禁用成功'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => '插件禁用失败：' . $e->getMessage()
+            ], 400);
+        }
 
     }
 
@@ -168,6 +175,11 @@ class PluginController extends Controller
         ]);
 
         try {
+            if (!Schema::hasTable((new \App\Models\Plugin())->getTable())) {
+                return response()->json([
+                    'message' => '插件表未初始化'
+                ], 400);
+            }
             $config = $this->configService->getConfig($request->input('code'));
             return response()->json([
                 'data' => $config

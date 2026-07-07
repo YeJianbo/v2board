@@ -8,12 +8,15 @@ use App\Services\MailService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class MailTemplateController extends Controller
 {
     public function list()
     {
-        $dbTemplates = MailTemplate::all()->keyBy('name');
+        $dbTemplates = Schema::hasTable((new MailTemplate())->getTable())
+            ? MailTemplate::all()->keyBy('name')
+            : collect();
 
         $result = [];
         foreach (MailTemplate::TEMPLATES as $name => $meta) {
@@ -38,7 +41,9 @@ class MailTemplateController extends Controller
             return $this->fail([404, '模板不存在']);
         }
 
-        $db = MailTemplate::where('name', $name)->first();
+        $db = Schema::hasTable((new MailTemplate())->getTable())
+            ? MailTemplate::where('name', $name)->first()
+            : null;
 
         return $this->success([
             'name' => $name,
@@ -69,6 +74,10 @@ class MailTemplateController extends Controller
             return $this->fail([422, implode('; ', $errors)]);
         }
 
+        if (!Schema::hasTable((new MailTemplate())->getTable())) {
+            return $this->fail([400, '邮件模板表未初始化']);
+        }
+
         MailTemplate::updateOrCreate(
             ['name' => $params['name']],
             ['subject' => $params['subject'], 'content' => $params['content']]
@@ -86,7 +95,9 @@ class MailTemplateController extends Controller
             return $this->fail([404, '模板不存在']);
         }
 
-        MailTemplate::where('name', $name)->delete();
+        if (Schema::hasTable((new MailTemplate())->getTable())) {
+            MailTemplate::where('name', $name)->delete();
+        }
         Cache::forget("mail_template:{$name}");
         return $this->success(true);
     }

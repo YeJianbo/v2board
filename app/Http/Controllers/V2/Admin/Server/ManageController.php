@@ -440,4 +440,10 @@ class ManageController extends Controller
             'config' => $configPem,
         ]);
     }
+
+    public function connectivityTestResult(Request $request)
+    {
+        return app(\App\Http\Controllers\V1\Admin\Server\ManageController::class)
+            ->connectivityTestResult($request);
+    }
 }

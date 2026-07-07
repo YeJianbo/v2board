@@ -100,6 +100,7 @@ class OrderController extends Controller
         }
 
         [$operator, $filterValue] = explode(':', $value, 2);
+        $operator = strtolower($operator);
 
         // Convert numeric strings to appropriate type
         if (is_numeric($filterValue)) {
@@ -108,8 +109,18 @@ class OrderController extends Controller
                 : (int) $filterValue;
         }
 
+        if ($operator === 'null') {
+            $query->whereNull($field);
+            return;
+        }
+
+        if ($operator === 'notnull') {
+            $query->whereNotNull($field);
+            return;
+        }
+
         // Apply operator
-        $query->where($field, match (strtolower($operator)) {
+        $query->where($field, match ($operator) {
             'eq' => '=',
             'gt' => '>',
             'gte' => '>=',
@@ -117,12 +128,9 @@ class OrderController extends Controller
             'lte' => '<=',
             'like' => 'like',
             'notlike' => 'not like',
-            'null' => static fn($q) => $q->whereNull($field),
-            'notnull' => static fn($q) => $q->whereNotNull($field),
             default => 'like'
-        }, match (strtolower($operator)) {
+        }, match ($operator) {
             'like', 'notlike' => "%{$filterValue}%",
-            'null', 'notnull' => null,
             default => $filterValue
         });
     }

@@ -8,6 +8,7 @@ use App\Models\TrafficResetLog;
 use App\Services\TrafficResetService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * 流量重置管理控制器
@@ -36,6 +37,18 @@ class TrafficResetController extends Controller
       'per_page' => 'nullable|integer|min:1|max:10000',
       'page' => 'nullable|integer|min:1',
     ]);
+
+    if (!Schema::hasTable((new TrafficResetLog())->getTable())) {
+      return response()->json([
+        'data' => [],
+        'pagination' => [
+          'current_page' => 1,
+          'last_page' => 1,
+          'per_page' => (int) $request->get('per_page', 20),
+          'total' => 0,
+        ],
+      ]);
+    }
 
     $query = TrafficResetLog::with(['user:id,email'])
       ->orderBy('reset_time', 'desc');
@@ -121,6 +134,17 @@ class TrafficResetController extends Controller
     $days = $request->get('days', 30);
     $startDate = now()->subDays($days)->startOfDay();
 
+    if (!Schema::hasTable((new TrafficResetLog())->getTable())) {
+      return response()->json([
+        'data' => [
+          'total_resets' => 0,
+          'auto_resets' => 0,
+          'manual_resets' => 0,
+          'cron_resets' => 0,
+        ],
+      ]);
+    }
+
     $stats = [
       'total_resets' => TrafficResetLog::where('reset_time', '>=', $startDate)->count(),
       'auto_resets' => TrafficResetLog::where('reset_time', '>=', $startDate)
@@ -150,6 +174,12 @@ class TrafficResetController extends Controller
     ]);
 
     $user = User::find($request->user_id);
+
+    if (!Schema::hasTable((new TrafficResetLog())->getTable())) {
+      return response()->json([
+        'message' => '流量重置日志表未初始化'
+      ], 400);
+    }
 
             if (!$this->trafficResetService->canReset($user)) {
             return response()->json([
@@ -195,6 +225,21 @@ class TrafficResetController extends Controller
 
     $user = User::findOrFail($userId);
     $limit = $request->get('limit', 10);
+
+    if (!Schema::hasTable((new TrafficResetLog())->getTable())) {
+      return response()->json([
+        "data" => [
+          'user' => [
+            'id' => $user->id,
+            'email' => $user->email,
+            'reset_count' => $user->reset_count,
+            'last_reset_at' => $user->last_reset_at,
+            'next_reset_at' => $user->next_reset_at,
+          ],
+          'history' => [],
+        ]
+      ]);
+    }
 
     $history = $this->trafficResetService->getUserResetHistory($user, $limit);
 

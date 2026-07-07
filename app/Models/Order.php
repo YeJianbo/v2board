@@ -24,4 +24,14 @@ class Order extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function invite_user()
+    {
+        return $this->belongsTo(User::class, 'invite_user_id');
+    }
+
+    public function commission_log()
+    {
+        return $this->hasMany(CommissionLog::class, 'trade_no', 'trade_no');
+    }
 }

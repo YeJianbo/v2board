@@ -19,6 +19,16 @@ class TicketController extends Controller
                 $builder->where(function ($query) use ($key, $value) {
                     if (is_array($value)) {
                         $query->whereIn($key, $value);
+                    } else if (is_string($value) && str_contains($value, ':')) {
+                        [$operator, $filterValue] = explode(':', $value, 2);
+                        $query->where($key, match (strtolower($operator)) {
+                            'eq' => '=',
+                            'gt' => '>',
+                            'gte' => '>=',
+                            'lt' => '<',
+                            'lte' => '<=',
+                            default => 'like',
+                        }, strtolower($operator) === 'like' ? "%{$filterValue}%" : $filterValue);
                     } else {
                         $query->where($key, 'like', "%{$value}%");
                     }
