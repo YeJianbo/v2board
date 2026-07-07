@@ -338,6 +338,10 @@ class ClashMeta
                 $targetIndex--;
             }
             $target = $parts[$targetIndex] ?? null;
+            if ($target === '🌐 IPv6') {
+                $rules[] = $rule;
+                continue;
+            }
             if (!$target || !isset($providerMap[$target])) {
                 $rules[] = $rule;
                 continue;
@@ -366,14 +370,14 @@ class ClashMeta
 
         $config['rule-providers'] = $providers;
         $config['rules'] = array_values(array_unique(array_merge(
-            $this->getSubscriptionDirectRules(),
+            $this->getSubscriptionBunCloudRules(),
             $rules,
             $deferredMatchRules
         )));
         return $config;
     }
 
-    private function getSubscriptionDirectRules(): array
+    private function getSubscriptionBunCloudRules(): array
     {
         $hosts = [];
         foreach ([$_SERVER['HTTP_HOST'] ?? null, parse_url(config('v2board.app_url'), PHP_URL_HOST)] as $host) {
@@ -384,7 +388,7 @@ class ClashMeta
         }
 
         return array_map(function ($host) {
-            return "DOMAIN,{$host},DIRECT";
+            return "DOMAIN,{$host},🐻 BunCloud";
         }, array_keys($hosts));
     }
 

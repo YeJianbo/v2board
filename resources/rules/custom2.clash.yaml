@@ -20,6 +20,10 @@ dns:
   - '*.lan'
   - '*.local'
   - '*.arpa'
+  - v2b.151376.xyz
+  - v2.151376.xyz
+  - '*.151376.xyz'
+  - '*.buncloud.eu.org'
   - ntp.*.com
   - time.*.com
   - +.market.xiaomi.com
