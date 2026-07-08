@@ -28,4 +28,9 @@ class User extends Model
     {
         return $this->belongsTo(ServerGroup::class, 'group_id');
     }
+
+    public function scopeByEmail($query, string $email)
+    {
+        return $query->where('email', trim($email));
+    }
 }
