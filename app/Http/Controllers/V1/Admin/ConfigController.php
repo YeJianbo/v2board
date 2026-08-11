@@ -65,6 +65,28 @@ class ConfigController extends Controller
         ]);
     }
 
+    public function testTelegram(Request $request)
+    {
+        $params = $request->validate([
+            'telegram_bot_token' => 'nullable|string',
+            'chat_id' => ['nullable', 'regex:/^-?\d+$/'],
+        ]);
+        $telegramService = new TelegramService($params['telegram_bot_token'] ?? '');
+        $message = "BunCloud Telegram通知测试\n时间：" . date('Y-m-d H:i:s');
+
+        if (!empty($params['chat_id'])) {
+            $telegramService->sendMessage((int) $params['chat_id'], $message);
+            return response(['data' => ['recipients' => 1]]);
+        }
+
+        $recipients = $telegramService->sendMessageWithAdmin($message, false, '', true);
+        if ($recipients < 1) {
+            abort(422, '没有可用的Telegram管理员收件人');
+        }
+
+        return response(['data' => ['recipients' => $recipients]]);
+    }
+
     public function fetch(Request $request)
     {
         $key = $request->input('key');
@@ -93,6 +115,7 @@ class ConfigController extends Controller
             'site' => [
                 'logo' => config('v2board.logo'),
                 'force_https' => (int)config('v2board.force_https', 0),
+                'user_frontend_enable' => (int)config('v2board.user_frontend_enable', 1),
                 'stop_register' => (int)config('v2board.stop_register', 0),
                 'app_name' => config('v2board.app_name', 'V2Board'),
                 'app_description' => config('v2board.app_description', 'V2Board is best!'),
@@ -145,7 +168,26 @@ class ConfigController extends Controller
             'telegram' => [
                 'telegram_bot_enable' => config('v2board.telegram_bot_enable', 0),
                 'telegram_bot_token' => config('v2board.telegram_bot_token'),
-                'telegram_discuss_link' => config('v2board.telegram_discuss_link')
+                'telegram_admin_chat_id' => config('v2board.telegram_admin_chat_id', ''),
+                'telegram_discuss_id' => config('v2board.telegram_discuss_id', ''),
+                'telegram_channel_id' => config('v2board.telegram_channel_id', ''),
+                'telegram_discuss_link' => config('v2board.telegram_discuss_link'),
+                'telegram_machine_alert_enable' => (int)config('v2board.telegram_machine_alert_enable', 1),
+                'telegram_machine_status_alert_enable' => (int)config('v2board.telegram_machine_status_alert_enable', 1),
+                'telegram_machine_offline_seconds' => (int)config('v2board.telegram_machine_offline_seconds', 300),
+                'telegram_machine_resource_alert_enable' => (int)config('v2board.telegram_machine_resource_alert_enable', 1),
+                'telegram_machine_resource_consecutive' => (int)config('v2board.telegram_machine_resource_consecutive', 3),
+                'telegram_machine_resource_duration_seconds' => (int)config('v2board.telegram_machine_resource_duration_seconds', 180),
+                'telegram_machine_cpu_alert_enable' => (int)config('v2board.telegram_machine_cpu_alert_enable', 1),
+                'telegram_machine_cpu_threshold' => (int)config('v2board.telegram_machine_cpu_threshold', 90),
+                'telegram_machine_memory_alert_enable' => (int)config('v2board.telegram_machine_memory_alert_enable', 1),
+                'telegram_machine_memory_threshold' => (int)config('v2board.telegram_machine_memory_threshold', 90),
+                'telegram_machine_disk_alert_enable' => (int)config('v2board.telegram_machine_disk_alert_enable', 1),
+                'telegram_machine_disk_threshold' => (int)config('v2board.telegram_machine_disk_threshold', 95),
+                'telegram_machine_network_alert_enable' => (int)config('v2board.telegram_machine_network_alert_enable', 0),
+                'telegram_machine_network_mbps_threshold' => (float)config('v2board.telegram_machine_network_mbps_threshold', 0),
+                'telegram_user_traffic_alert_enable' => (int)config('v2board.telegram_user_traffic_alert_enable', 1),
+                'telegram_user_traffic_threshold' => (int)config('v2board.telegram_user_traffic_threshold', 95),
             ],
             'app' => [
                 'windows_version' => config('v2board.windows_version'),

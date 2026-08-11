@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\StatisticalService;
+use App\Services\TelegramNotificationService;
 use Illuminate\Console\Command;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -57,7 +58,15 @@ class TrafficUpdate extends Command
         }
 
         $userIds = array_values(array_unique(array_merge(array_keys($uploads), array_keys($downloads))));
-        $users = User::whereIn('id', $userIds)->get(['id', 'u', 'd']);
+        $users = User::whereIn('id', $userIds)->get([
+            'id',
+            'u',
+            'd',
+            'transfer_enable',
+            'expired_at',
+            'remind_traffic',
+            'telegram_id',
+        ]);
         $time = time();
         $casesU = [];
         $casesD = [];
@@ -67,8 +76,10 @@ class TrafficUpdate extends Command
             $upload = $uploads[$user->id] ?? 0;
             $download = $downloads[$user->id] ?? 0;
 
-            $casesU[] = "WHEN {$user->id} THEN " . ($user->u + $upload);
-            $casesD[] = "WHEN {$user->id} THEN " . ($user->d + $download);
+            $user->u = (int) $user->u + (int) $upload;
+            $user->d = (int) $user->d + (int) $download;
+            $casesU[] = "WHEN {$user->id} THEN " . $user->u;
+            $casesD[] = "WHEN {$user->id} THEN " . $user->d;
             $idList[] = $user->id;
         }
 
@@ -88,6 +99,18 @@ class TrafficUpdate extends Command
             DB::rollBack();
             \Log::error('流量更新失败: ' . $e->getMessage());
             return;
+        }
+
+        $notificationService = app(TelegramNotificationService::class);
+        foreach ($users as $user) {
+            try {
+                $notificationService->remindUserTraffic($user);
+            } catch (\Throwable $e) {
+                \Log::warning('Telegram流量提醒处理失败', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 

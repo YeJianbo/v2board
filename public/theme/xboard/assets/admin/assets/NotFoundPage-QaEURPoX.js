@@ -1,0 +1,1 @@
+import{$r as e,Si as t,Ti as n,ni as r}from"./vendor-editor-DOkQ0D86.js";import{O as i}from"./index-_b3eG4sG.js";var a={class:`not-found`},o=i({__name:`NotFoundPage`,setup(i){return t(()=>{document.title=`404 Not Found`}),(t,i)=>(n(),r(`div`,a,[...i[0]||(i[0]=[e(`h1`,null,`404 Not Found`,-1),e(`p`,null,`nginx`,-1)])]))}},[[`__scopeId`,`data-v-fb2e0a68`]]);export{o as default};

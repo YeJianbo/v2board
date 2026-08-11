@@ -69,6 +69,28 @@ class ConfigController extends Controller
         ]);
     }
 
+    public function testTelegram(Request $request)
+    {
+        $params = $request->validate([
+            'telegram_bot_token' => 'nullable|string',
+            'chat_id' => ['nullable', 'regex:/^-?\d+$/'],
+        ]);
+        $telegramService = new TelegramService($params['telegram_bot_token'] ?? '');
+        $message = "BunCloud Telegram通知测试\n时间：" . date('Y-m-d H:i:s');
+
+        if (!empty($params['chat_id'])) {
+            $telegramService->sendMessage((int) $params['chat_id'], $message);
+            return $this->success(['recipients' => 1]);
+        }
+
+        $recipients = $telegramService->sendMessageWithAdmin($message, false, '', true);
+        if ($recipients < 1) {
+            return $this->fail([422, '没有可用的Telegram管理员收件人']);
+        }
+
+        return $this->success(['recipients' => $recipients]);
+    }
+
     public function fetch(Request $request)
     {
         $key = $request->input('key');
@@ -106,6 +128,7 @@ class ConfigController extends Controller
             'site' => [
                 'logo' => admin_setting('logo'),
                 'force_https' => (int) admin_setting('force_https', 0),
+                'user_frontend_enable' => (int) admin_setting('user_frontend_enable', 1),
                 'stop_register' => (int) admin_setting('stop_register', 0),
                 'app_name' => admin_setting('app_name', 'BunCloud'),
                 'app_description' => admin_setting('app_description', 'BunCloud service panel'),
@@ -161,7 +184,26 @@ class ConfigController extends Controller
                 'telegram_bot_enable' => (bool) admin_setting('telegram_bot_enable', 0),
                 'telegram_bot_token' => admin_setting('telegram_bot_token'),
                 'telegram_webhook_url' => admin_setting('telegram_webhook_url'),
-                'telegram_discuss_link' => admin_setting('telegram_discuss_link')
+                'telegram_admin_chat_id' => admin_setting('telegram_admin_chat_id', ''),
+                'telegram_discuss_id' => admin_setting('telegram_discuss_id', ''),
+                'telegram_channel_id' => admin_setting('telegram_channel_id', ''),
+                'telegram_discuss_link' => admin_setting('telegram_discuss_link'),
+                'telegram_machine_alert_enable' => (bool) admin_setting('telegram_machine_alert_enable', 1),
+                'telegram_machine_status_alert_enable' => (bool) admin_setting('telegram_machine_status_alert_enable', 1),
+                'telegram_machine_offline_seconds' => (int) admin_setting('telegram_machine_offline_seconds', 300),
+                'telegram_machine_resource_alert_enable' => (bool) admin_setting('telegram_machine_resource_alert_enable', 1),
+                'telegram_machine_resource_consecutive' => (int) admin_setting('telegram_machine_resource_consecutive', 3),
+                'telegram_machine_resource_duration_seconds' => (int) admin_setting('telegram_machine_resource_duration_seconds', 180),
+                'telegram_machine_cpu_alert_enable' => (bool) admin_setting('telegram_machine_cpu_alert_enable', 1),
+                'telegram_machine_cpu_threshold' => (int) admin_setting('telegram_machine_cpu_threshold', 90),
+                'telegram_machine_memory_alert_enable' => (bool) admin_setting('telegram_machine_memory_alert_enable', 1),
+                'telegram_machine_memory_threshold' => (int) admin_setting('telegram_machine_memory_threshold', 90),
+                'telegram_machine_disk_alert_enable' => (bool) admin_setting('telegram_machine_disk_alert_enable', 1),
+                'telegram_machine_disk_threshold' => (int) admin_setting('telegram_machine_disk_threshold', 95),
+                'telegram_machine_network_alert_enable' => (bool) admin_setting('telegram_machine_network_alert_enable', 0),
+                'telegram_machine_network_mbps_threshold' => (float) admin_setting('telegram_machine_network_mbps_threshold', 0),
+                'telegram_user_traffic_alert_enable' => (bool) admin_setting('telegram_user_traffic_alert_enable', 1),
+                'telegram_user_traffic_threshold' => (int) admin_setting('telegram_user_traffic_threshold', 95),
             ],
             'app' => [
                 'windows_version' => admin_setting('windows_version', ''),

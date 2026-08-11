@@ -4,14 +4,23 @@ namespace App\Services;
 use App\Jobs\SendTelegramJob;
 use App\Models\User;
 use \Curl\Curl;
-use Illuminate\Mail\Markdown;
+use RuntimeException;
 
-class TelegramService {
+class TelegramService
+{
     protected $api;
+    protected $token;
 
     public function __construct($token = '')
     {
-        $this->api = 'https://api.telegram.org/bot' . config('v2board.telegram_bot_token', $token) . '/';
+        $configuredToken = function_exists('admin_setting')
+            ? admin_setting('telegram_bot_token', config('v2board.telegram_bot_token', ''))
+            : config('v2board.telegram_bot_token', '');
+        $explicitToken = trim((string) $token);
+        $this->token = $explicitToken !== ''
+            ? $explicitToken
+            : trim((string) $configuredToken);
+        $this->api = 'https://api.telegram.org/bot' . $this->token . '/';
     }
 
     public function sendMessage(int $chatId, string $text, string $parseMode = '')
@@ -19,11 +28,14 @@ class TelegramService {
         if ($parseMode === 'markdown') {
             $text = str_replace('_', '\_', $text);
         }
-        $this->request('sendMessage', [
+        $params = [
             'chat_id' => $chatId,
             'text' => $text,
-            'parse_mode' => $parseMode
-        ]);
+        ];
+        if ($parseMode !== '') {
+            $params['parse_mode'] = $parseMode;
+        }
+        $this->request('sendMessage', $params);
     }
 
     public function approveChatJoinRequest(int $chatId, int $userId)
@@ -110,20 +122,38 @@ class TelegramService {
 
     private function request(string $method, array $params = [])
     {
+        if ($this->token === '') {
+            throw new RuntimeException('Telegram Bot Token未配置');
+        }
+
         $curl = new Curl();
-        $curl->get($this->api . $method . '?' . http_build_query($params));
+        $curl->setTimeout(10);
+        $curl->post($this->api . $method, $params);
         $response = $curl->response;
         $curl->close();
-        if (!isset($response->ok)) abort(500, '请求失败');
+        if (!is_object($response) || !isset($response->ok)) {
+            throw new RuntimeException('Telegram请求失败');
+        }
         if (!$response->ok) {
-            abort(500, '来自TG的错误：' . $response->description);
+            throw new RuntimeException('来自TG的错误：' . ($response->description ?? '未知错误'));
         }
         return $response;
     }
 
-    public function sendMessageWithAdmin($message, $isStaff = false)
+    public function sendMessageWithAdmin(
+        $message,
+        $isStaff = false,
+        string $parseMode = 'markdown',
+        bool $synchronously = false
+    ): int
     {
-        if (!config('v2board.telegram_bot_enable', 0)) return;
+        $enabled = function_exists('admin_setting')
+            ? admin_setting('telegram_bot_enable', config('v2board.telegram_bot_enable', 0))
+            : config('v2board.telegram_bot_enable', 0);
+        if (!$enabled || $this->token === '') {
+            return 0;
+        }
+
         $users = User::where(function ($query) use ($isStaff) {
             $query->where('is_admin', 1);
             if ($isStaff) {
@@ -131,9 +161,43 @@ class TelegramService {
             }
         })
             ->where('telegram_id', '!=', NULL)
-            ->get();
-        foreach ($users as $user) {
-            SendTelegramJob::dispatch($user->telegram_id, $message);
+            ->pluck('telegram_id')
+            ->all();
+
+        $chatIds = array_merge($users, $this->configuredAdminChatIds());
+        $chatIds = array_values(array_unique(array_filter(array_map(function ($chatId) {
+            $chatId = trim((string) $chatId);
+            return preg_match('/^-?\d+$/', $chatId) ? (int) $chatId : null;
+        }, $chatIds))));
+
+        foreach ($chatIds as $chatId) {
+            if ($synchronously) {
+                $this->sendMessage($chatId, (string) $message, $parseMode);
+                continue;
+            }
+
+            SendTelegramJob::dispatch($chatId, (string) $message, $parseMode);
         }
+
+        return count($chatIds);
+    }
+
+    private function configuredAdminChatIds(): array
+    {
+        $values = [];
+        foreach (['telegram_admin_chat_id', 'telegram_discuss_id', 'telegram_channel_id'] as $key) {
+            $value = function_exists('admin_setting')
+                ? admin_setting($key, config('v2board.' . $key))
+                : config('v2board.' . $key);
+            if (is_array($value)) {
+                $values = array_merge($values, $value);
+                continue;
+            }
+            if ($value !== null && $value !== '') {
+                $values = array_merge($values, preg_split('/[\s,;]+/', (string) $value) ?: []);
+            }
+        }
+
+        return $values;
     }
 }
