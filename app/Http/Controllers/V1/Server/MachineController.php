@@ -1377,6 +1377,17 @@ class MachineController extends Controller
         ]);
     }
 
+    public function unregister(Request $request)
+    {
+        $machine = $this->authenticate($request);
+        $machine = Machine::findOrFail((int) $machine->id);
+        $machine->delete();
+
+        return response()->json([
+            'data' => 'success',
+        ]);
+    }
+
     public function restartAck(Request $request)
     {
         $machine = $this->authenticate($request);

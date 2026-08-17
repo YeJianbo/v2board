@@ -21,6 +21,7 @@ class ServerRoute
                 'push' => 'push',
                 'enroll' => 'enroll',
                 'v2nodeconfig' => 'v2nodeConfig',
+                'unregister' => 'unregister',
                 'restartack' => 'restartAck',
                 'bbrack' => 'bbrAck',
                 'connectivitytestack' => 'connectivityTestAck',
