@@ -8,7 +8,7 @@ account, configures Horizon and the Laravel scheduler, and attempts to issue a
 Let's Encrypt certificate after Nginx is reachable.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/YeJianbo/v2board-backend-custom/main/deploy/install.sh) \
+bash <(curl -fsSL https://raw.githubusercontent.com/YeJianbo/v2board/main/deploy/install.sh) \
   --domain panel.example.com \
   --admin-email admin@example.com
 ```

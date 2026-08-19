@@ -3,7 +3,7 @@
 从空服务器直接安装或恢复时，可优先使用上一级的统一入口：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/YeJianbo/v2board-backend-custom/main/deploy/install.sh) \
+bash <(curl -fsSL https://raw.githubusercontent.com/YeJianbo/v2board/main/deploy/install.sh) \
   --domain panel.example.com \
   --archive /root/v2board-migration.tar.gz \
   --force

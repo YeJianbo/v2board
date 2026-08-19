@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 umask 077
 
-REPO_URL="https://github.com/YeJianbo/v2board-backend-custom.git"
+REPO_URL="https://github.com/YeJianbo/v2board.git"
 BRANCH="main"
 SITE_ROOT="/www/wwwroot/v2board"
 DOMAIN=""
@@ -24,7 +24,7 @@ Restore a migration package:
   bash install.sh --archive /root/v2board-migration.tar.gz --domain panel.example.com --force
 
 Options:
-  --repo URL           Git repository (default: YeJianbo/v2board-backend-custom)
+  --repo URL           Git repository (default: YeJianbo/v2board)
   --branch NAME        Git branch or tag (default: main)
   --site-root PATH     Website directory (default: /www/wwwroot/v2board)
   --domain DOMAIN      Primary domain
