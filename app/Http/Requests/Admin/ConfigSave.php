@@ -131,7 +131,16 @@ class ConfigSave extends FormRequest
         'subscribe_template_clashmeta' => 'nullable',
         'subscribe_template_stash' => 'nullable',
         'subscribe_template_surge' => 'nullable',
-        'subscribe_template_surfboard' => 'nullable'
+        'subscribe_template_surfboard' => 'nullable',
+        // backup
+        'backup_enable' => 'boolean',
+        'backup_type' => 'in:database,migration',
+        'backup_frequency' => 'in:daily,weekly',
+        'backup_time' => ['regex:/^(?:[01]\d|2[0-3]):[0-5]\d$/'],
+        'backup_local_path' => 'nullable|string|max:500',
+        'backup_remote' => 'nullable|string|max:500',
+        'backup_keep_days' => 'integer|min:1|max:3650',
+        'backup_password' => 'nullable|string|max:500'
     ];
     /**
      * Get the validation rules that apply to the request.

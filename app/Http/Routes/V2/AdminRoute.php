@@ -20,6 +20,7 @@ use App\Http\Controllers\V2\Admin\PaymentController;
 use App\Http\Controllers\V2\Admin\SystemController;
 use App\Http\Controllers\V2\Admin\ThemeController;
 use App\Http\Controllers\V2\Admin\TrafficResetController;
+use App\Http\Controllers\V2\Admin\BackupController;
 use Illuminate\Contracts\Routing\Registrar;
 
 class AdminRoute
@@ -42,6 +43,8 @@ class AdminRoute
                 $router->post('/testTelegram', [ConfigController::class, 'testTelegram']);
                 $router->post('/testSendMail', [ConfigController::class, 'testSendMail']);
             });
+            $router->get('/backup/status', [BackupController::class, 'status']);
+            $router->post('/backup/run', [BackupController::class, 'run']);
 
             // Mail Templates
             $router->group([

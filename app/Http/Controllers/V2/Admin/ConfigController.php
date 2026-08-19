@@ -248,6 +248,16 @@ class ConfigController extends Controller
                 'subscribe_template_stash' => subscribe_template('stash') ?? '',
                 'subscribe_template_surge' => subscribe_template('surge') ?? '',
                 'subscribe_template_surfboard' => subscribe_template('surfboard') ?? ''
+            ],
+            'backup' => [
+                'backup_enable' => (bool) admin_setting('backup_enable', false),
+                'backup_type' => admin_setting('backup_type', 'database'),
+                'backup_frequency' => admin_setting('backup_frequency', 'daily'),
+                'backup_time' => admin_setting('backup_time', '03:30'),
+                'backup_local_path' => admin_setting('backup_local_path', ''),
+                'backup_remote' => admin_setting('backup_remote', ''),
+                'backup_keep_days' => (int) admin_setting('backup_keep_days', 14),
+                'backup_password' => admin_setting('backup_password', ''),
             ]
         ];
     }

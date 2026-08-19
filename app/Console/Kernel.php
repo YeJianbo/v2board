@@ -44,6 +44,22 @@ class Kernel extends ConsoleKernel
         $schedule->command('send:remindMail')->dailyAt('11:30')->onOneServer()->withoutOverlapping(30);
         // horizon metrics
         $schedule->command('horizon:snapshot')->everyFiveMinutes()->onOneServer();
+        // backup (default 03:30 to avoid traffic reset and statistics jobs around midnight)
+        if ((bool) admin_setting('backup_enable', false)) {
+            $backupTime = (string) admin_setting('backup_time', '03:30');
+            if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $backupTime)) {
+                $backupTime = '03:30';
+            }
+            $backupCommand = $schedule->command('panel:backup')
+                ->onOneServer()
+                ->withoutOverlapping(360)
+                ->runInBackground();
+            if (admin_setting('backup_frequency', 'daily') === 'weekly') {
+                $backupCommand->weeklyOn(1, $backupTime);
+            } else {
+                $backupCommand->dailyAt($backupTime);
+            }
+        }
     }
 
     /**
