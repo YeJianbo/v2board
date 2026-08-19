@@ -72,28 +72,49 @@ class ManageController extends Controller
     public function getNodes(Request $request)
     {
         $serverService = new ServerService();
-        $servers = collect($serverService->getAllServers())->map(function ($item) {
+        $rawServers = collect($serverService->getAllServers());
+        $groupIds = $rawServers
+            ->flatMap(function ($item) {
+                return is_array($item['group_id'] ?? null) ? $item['group_id'] : [];
+            })
+            ->map(function ($id) {
+                return (int) $id;
+            })
+            ->filter()
+            ->unique()
+            ->values();
+        $groupsById = ServerGroup::whereIn('id', $groupIds)->get(['name', 'id'])->keyBy('id');
+        $serversByKey = $rawServers->keyBy(function ($item) {
+            return strtolower((string) ($item['type'] ?? '')) . ':' . (int) ($item['id'] ?? 0);
+        });
+
+        $servers = $rawServers->map(function ($item) use ($groupsById, $serversByKey) {
             $rawId = $item['id'];
             $type = $item['type'];
+            $rawParentId = (int) ($item['parent_id'] ?? 0);
             $encodedId = self::encodeId($rawId, $type);
             $item['id'] = $encodedId;
-            if (isset($item['parent_id']) && $item['parent_id']) {
-                $item['parent_id'] = self::encodeId($item['parent_id'], $type);
+            if ($rawParentId > 0) {
+                $item['parent_id'] = self::encodeId($rawParentId, $type);
             }
-            $item['groups'] = ServerGroup::whereIn('id', $item['group_id'] ?? [])->get(['name', 'id']);
+            $item['groups'] = collect($item['group_id'] ?? [])
+                ->map(function ($groupId) use ($groupsById) {
+                    return $groupsById->get((int) $groupId);
+                })
+                ->filter()
+                ->values();
             $item['group_ids'] = array_map('strval', $item['group_id'] ?? []);
             $item['route_ids'] = array_map('strval', $item['route_id'] ?? []);
-            
+
             $item['parent'] = null;
-            if (isset($item['parent_id']) && $item['parent_id']) {
-                $modelClass = $this->getServerModelClass($type);
-                if ($modelClass) {
-                    $parent = $modelClass::find($item['parent_id']);
-                    if ($parent) {
-                        $parentArray = $parent->toArray();
-                        $parentArray['id'] = self::encodeId($parentArray['id'], $type);
-                        $item['parent'] = $parentArray;
+            if ($rawParentId > 0) {
+                $parent = $serversByKey->get(strtolower((string) $type) . ':' . $rawParentId);
+                if ($parent) {
+                    $parent['id'] = self::encodeId($parent['id'], $type);
+                    if (!empty($parent['parent_id'])) {
+                        $parent['parent_id'] = self::encodeId($parent['parent_id'], $type);
                     }
+                    $item['parent'] = $parent;
                 }
             }
             return $item;
@@ -103,32 +124,67 @@ class ManageController extends Controller
 
     public function sort(Request $request)
     {
-        ini_set('post_max_size', '1m');
         $params = $request->validate([
-            '*.id' => 'numeric',
-            '*.order' => 'numeric'
+            '*' => 'required|array',
+            '*.id' => 'required|integer|min:1000001|max:8999999',
+            '*.order' => 'required|integer|min:1|max:100000'
         ]);
 
+        if (count($params) > 10000) {
+            return $this->fail([422, '一次最多排序 10000 个节点']);
+        }
+
         try {
-            DB::beginTransaction();
-            collect($params)->each(function ($item) {
-                if (isset($item['id']) && isset($item['order'])) {
-                    $decoded = self::decodeId($item['id']);
-                    if ($decoded['type']) {
-                        $modelClass = $this->getServerModelClass($decoded['type']);
-                        if ($modelClass) {
-                            $modelClass::where('id', $decoded['id'])->update(['sort' => $item['order']]);
-                        }
-                    }
+            $grouped = [];
+            $seen = [];
+            foreach ($params as $item) {
+                $encodedId = (int) $item['id'];
+                if (isset($seen[$encodedId])) {
+                    return $this->fail([422, '排序数据包含重复节点']);
                 }
-            });
-            DB::commit();
+                $seen[$encodedId] = true;
+                $decoded = self::decodeId($encodedId);
+                if (!$decoded['type']) {
+                    return $this->fail([422, '排序数据包含无效节点 ID']);
+                }
+                $grouped[$decoded['type']][(int) $decoded['id']] = (int) $item['order'];
+            }
+
+            DB::transaction(function () use ($grouped) {
+                foreach ($grouped as $type => $orders) {
+                    $modelClass = $this->getServerModelClass($type);
+                    if (!$modelClass || !$orders) {
+                        continue;
+                    }
+
+                    $table = (new $modelClass())->getTable();
+                    $ids = array_keys($orders);
+                    $bindings = [];
+                    $cases = [];
+                    foreach ($orders as $id => $order) {
+                        $cases[] = 'WHEN ? THEN ?';
+                        $bindings[] = $id;
+                        $bindings[] = $order;
+                    }
+                    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                    array_push($bindings, ...$ids);
+                    DB::update(
+                        "UPDATE `{$table}` SET `sort` = CASE `id` " . implode(' ', $cases) . " END WHERE `id` IN ({$placeholders})",
+                        $bindings
+                    );
+                }
+            }, 3);
+
+            foreach (array_keys($grouped) as $type) {
+                \Illuminate\Support\Facades\Cache::forget('servers_' . $type);
+            }
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error($e);
             return $this->fail([500, '保存失败']);
         }
-        return $this->success(true);
+        return $this->success([
+            'updated' => count($params),
+        ]);
     }
 
     public function save(ServerSave $request)
