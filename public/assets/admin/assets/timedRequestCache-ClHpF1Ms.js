@@ -1,0 +1,1 @@
+function e(e){let t=Math.max(Number(e||0),0),n,r=!1,i=0,a=null,o=0;function s(){o+=1,n=void 0,r=!1,i=0,a=null}async function c(e,c={}){if(c.force&&s(),r&&Date.now()<i)return n;if(a)return a;let l=o,u=Promise.resolve().then(e).then(function(e){return l===o&&(n=e,r=!0,i=Date.now()+t),e}).finally(function(){a===u&&(a=null)});return a=u,u}return{clear:s,get:c}}export{e as t};

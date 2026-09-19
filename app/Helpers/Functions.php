@@ -51,7 +51,7 @@ if (!function_exists('admin_settings_batch')) {
      */
     function admin_settings_batch(array $keys): array
     {
-        return app(Setting::class)->getBatch($keys);
+        return app(\App\Services\SettingService::class)->getBatch($keys);
     }
 }
 

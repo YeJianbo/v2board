@@ -6,10 +6,12 @@ use App\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ServerSave;
 use App\Models\ServerGroup;
+use App\Services\ServerMetadataService;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 class ManageController extends Controller
 {
@@ -71,8 +73,11 @@ class ManageController extends Controller
 
     public function getNodes(Request $request)
     {
+        $includeParent = $request->boolean('include_parent', true);
         $serverService = new ServerService();
-        $rawServers = collect($serverService->getAllServers());
+        $rawServers = collect(
+            app(ServerMetadataService::class)->decorateServers($serverService->getAllServers())
+        );
         $groupIds = $rawServers
             ->flatMap(function ($item) {
                 return is_array($item['group_id'] ?? null) ? $item['group_id'] : [];
@@ -84,11 +89,13 @@ class ManageController extends Controller
             ->unique()
             ->values();
         $groupsById = ServerGroup::whereIn('id', $groupIds)->get(['name', 'id'])->keyBy('id');
-        $serversByKey = $rawServers->keyBy(function ($item) {
-            return strtolower((string) ($item['type'] ?? '')) . ':' . (int) ($item['id'] ?? 0);
-        });
+        $serversByKey = $includeParent
+            ? $rawServers->keyBy(function ($item) {
+                return strtolower((string) ($item['type'] ?? '')) . ':' . (int) ($item['id'] ?? 0);
+            })
+            : null;
 
-        $servers = $rawServers->map(function ($item) use ($groupsById, $serversByKey) {
+        $servers = $rawServers->map(function ($item) use ($groupsById, $serversByKey, $includeParent) {
             $rawId = $item['id'];
             $type = $item['type'];
             $rawParentId = (int) ($item['parent_id'] ?? 0);
@@ -106,8 +113,10 @@ class ManageController extends Controller
             $item['group_ids'] = array_map('strval', $item['group_id'] ?? []);
             $item['route_ids'] = array_map('strval', $item['route_id'] ?? []);
 
-            $item['parent'] = null;
-            if ($rawParentId > 0) {
+            if ($includeParent) {
+                $item['parent'] = null;
+            }
+            if ($includeParent && $rawParentId > 0) {
                 $parent = $serversByKey->get(strtolower((string) $type) . ':' . $rawParentId);
                 if ($parent) {
                     $parent['id'] = self::encodeId($parent['id'], $type);
@@ -124,11 +133,18 @@ class ManageController extends Controller
 
     public function sort(Request $request)
     {
-        $params = $request->validate([
+        // The sort payload is a JSON root array. Read the untouched HTTP body:
+        // admin middleware merges its user field into Laravel's JSON input bag.
+        $params = json_decode((string) $request->getContent(), true);
+        if (!is_array($params)) {
+            $params = [];
+        }
+        $validator = Validator::make($params, [
             '*' => 'required|array',
             '*.id' => 'required|integer|min:1000001|max:8999999',
             '*.order' => 'required|integer|min:1|max:100000'
         ]);
+        $params = $validator->validate();
 
         if (count($params) > 10000) {
             return $this->fail([422, '一次最多排序 10000 个节点']);
@@ -189,6 +205,7 @@ class ManageController extends Controller
 
     public function save(ServerSave $request)
     {
+        $metadata = $this->validateServerMetadata($request);
         $params = $request->validated();
         $type = $request->input('type');
         $modelClass = $this->getServerModelClass($type);
@@ -218,6 +235,7 @@ class ManageController extends Controller
             }
             try {
                 $server->update($params);
+                $this->saveServerMetadata($type, (int) $server->id, $metadata);
                 return $this->success(true);
             } catch (\Exception $e) {
                 Log::error($e);
@@ -226,7 +244,8 @@ class ManageController extends Controller
         }
 
         try {
-            $modelClass::create($params);
+            $server = $modelClass::create($params);
+            $this->saveServerMetadata($type, (int) $server->id, $metadata);
             return $this->success(true);
         } catch (\Exception $e) {
             Log::error($e);
@@ -289,6 +308,7 @@ class ManageController extends Controller
         if ($server->delete() === false) {
             return $this->fail([500, '删除失败']);
         }
+        $this->deleteServerMetadata($decoded['type'], (int) $decoded['id']);
 
         return $this->success(true);
     }
@@ -312,6 +332,7 @@ class ManageController extends Controller
                     $modelClass = $this->getServerModelClass($decoded['type']);
                     if ($modelClass) {
                         $modelClass::where('id', $decoded['id'])->delete();
+                        $this->deleteServerMetadata($decoded['type'], (int) $decoded['id']);
                     }
                 }
             });
@@ -450,6 +471,11 @@ class ManageController extends Controller
         $copiedServer->u = 0;
         $copiedServer->d = 0;
         $copiedServer->save();
+        $this->copyServerMetadata(
+            $decoded['type'],
+            (int) $server->id,
+            (int) $copiedServer->id
+        );
 
         return $this->success(true);
     }

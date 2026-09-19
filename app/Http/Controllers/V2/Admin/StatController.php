@@ -21,37 +21,44 @@ use Illuminate\Support\Facades\Schema;
 
 class StatController extends Controller
 {
+    private const DASHBOARD_STATS_CACHE_KEY = 'admin:dashboard:stats:v2';
+    private const DASHBOARD_STATS_CACHE_SECONDS = 15;
+    private const TRAFFIC_RANK_CACHE_SECONDS = 15;
+    private const ONLINE_WINDOW_SECONDS = 600;
+
     private $service;
     public function __construct(StatisticalService $service)
     {
         $this->service = $service;
     }
-    private function getTotalNodesCount()
+    private function getNodeSummary(): array
     {
-        return \App\Models\ServerShadowsocks::count()
-            + \App\Models\ServerVmess::count()
-            + \App\Models\ServerTrojan::count()
-            + \App\Models\ServerVless::count()
-            + \App\Models\ServerTuic::count()
-            + \App\Models\ServerHysteria::count()
-            + \App\Models\ServerAnytls::count()
-            + \App\Models\ServerV2node::count();
+        return app(\App\Services\ServerService::class)->getNodeStatusSummary();
     }
 
     private function getOnlineUserSummary(): array
     {
-        $onlineQuery = User::where('t', '>=', time() - 600);
-        $onlineUsers = (clone $onlineQuery)->count();
-        $onlineDevices = $onlineUsers;
-
-        if ($this->hasUserOnlineCountColumn()) {
-            $onlineDevices = (clone $onlineQuery)->sum('online_count');
-        }
+        $summary = $this->onlineUsersQuery(time())
+            ->selectRaw('COUNT(*) as users, SUM(' . $this->onlineDeviceCountSql() . ') as devices')
+            ->first();
 
         return [
-            'users' => (int) $onlineUsers,
-            'devices' => max((int) $onlineDevices, (int) $onlineUsers),
+            'users' => (int) $summary->users,
+            'devices' => (int) $summary->devices,
         ];
+    }
+
+    private function onlineUsersQuery(int $now)
+    {
+        return User::where('t', '>=', $now - self::ONLINE_WINDOW_SECONDS);
+    }
+
+    private function onlineDeviceCountSql(): string
+    {
+        // Older reporters do not send a device count; an active user has at least one device.
+        return $this->hasUserOnlineCountColumn()
+            ? 'CASE WHEN online_count > 0 THEN online_count ELSE 1 END'
+            : '1';
     }
 
     private function hasUserOnlineCountColumn(): bool
@@ -61,11 +68,89 @@ class StatController extends Controller
         });
     }
 
+    public function getDetails(Request $request): array
+    {
+        $params = $request->validate([
+            'metric' => 'required|in:users,online-users,online-devices,online-nodes',
+            'page' => 'nullable|integer|min:1|max:1000000',
+            'page_size' => 'nullable|integer|min:1|max:100',
+            'search' => 'nullable|string|max:100',
+        ]);
+        $metric = $params['metric'];
+        $page = (int) ($params['page'] ?? 1);
+        $pageSize = (int) ($params['page_size'] ?? 10);
+        $search = trim($params['search'] ?? '');
+        $now = time();
+        $meta = ['as_of' => $now, 'online_window_seconds' => self::ONLINE_WINDOW_SECONDS];
+
+        if ($metric === 'online-nodes') {
+            $nodes = array_values(array_filter(
+                app(\App\Services\ServerService::class)->getNodeStatusDetails(),
+                static function ($node) use ($search) {
+                    return $node['is_online'] && ($search === '' ||
+                        mb_stripos($node['name'] . ' ' . $node['protocol'] . ' ' . $node['host'], $search) !== false);
+                }
+            ));
+            $total = count($nodes);
+            $page = min($page, max(1, (int) ceil($total / $pageSize)));
+            $rows = array_slice($nodes, ($page - 1) * $pageSize, $pageSize);
+        } else {
+            $query = $metric === 'users' ? User::query() : $this->onlineUsersQuery($now);
+            if ($search !== '') {
+                // Bind a literal substring, not SQL LIKE wildcards supplied by the search field.
+                $query->where(function ($query) use ($search) {
+                    $query->whereRaw('INSTR(email, ?) > 0', [$search]);
+                    if (ctype_digit($search)) {
+                        $query->orWhere('id', (int) $search);
+                    }
+                });
+            }
+            $counts = (clone $query)->selectRaw('COUNT(*) as users, SUM(' . $this->onlineDeviceCountSql() . ') as devices')->first();
+            $total = (int) $counts->users;
+            if ($metric !== 'users') {
+                $meta['online_users'] = $total;
+                $meta['online_devices'] = (int) $counts->devices;
+            }
+            $page = min($page, max(1, (int) ceil($total / $pageSize)));
+            $rows = $query->with('plan:id,name')
+                ->select(['id', 'email', 'plan_id', 'banned', 't', 'u', 'd', 'created_at'])
+                ->selectRaw($this->onlineDeviceCountSql() . ' as device_count')
+                ->when($metric !== 'users', static fn ($query) => $query->orderByDesc('t'))
+                ->orderByDesc('id')
+                ->offset(($page - 1) * $pageSize)->limit($pageSize)->get()
+                ->map(static function ($user) use ($now) {
+                    $online = (int) $user->t >= $now - self::ONLINE_WINDOW_SECONDS;
+                    return [
+                        'key' => 'user:' . $user->id,
+                        'id' => (int) $user->id,
+                        'email' => $user->email,
+                        'plan_name' => $user->plan->name ?? null,
+                        'is_online' => $online,
+                        'banned' => (bool) $user->banned,
+                        'device_count' => $online ? (int) $user->device_count : 0,
+                        'last_active_at' => (int) $user->t,
+                        'created_at' => (int) $user->created_at,
+                        'upload' => (int) $user->u,
+                        'download' => (int) $user->d,
+                    ];
+                })->all();
+        }
+
+        return [
+            'data' => $rows,
+            'meta' => $meta,
+            'total' => $total,
+            'current_page' => $page,
+            'per_page' => $pageSize,
+        ];
+    }
+
 
 
     public function getOverride(Request $request)
     {
-        $onlineNodes = $this->getTotalNodesCount();
+        $nodeSummary = $this->getNodeSummary();
+        $onlineNodes = $nodeSummary['online'];
         $onlineSummary = $this->getOnlineUserSummary();
         $onlineDevices = $onlineSummary['devices'];
         $onlineUsers = $onlineSummary['users'];
@@ -120,6 +205,7 @@ class StatController extends Controller
                     ->sum('get_amount'),
                 // 新增统计数据
                 'online_nodes' => $onlineNodes,
+                'total_nodes' => $nodeSummary['total'],
                 'online_devices' => $onlineDevices,
                 'online_users' => $onlineUsers,
                 'today_traffic' => [
@@ -797,10 +883,40 @@ class StatController extends Controller
         ];
     }
 
+    public function getRanking(Request $request)
+    {
+        $params = $request->validate([
+            'type' => 'required|in:server_traffic_rank,user_consumption_rank,invite_rank',
+            'start_at' => 'nullable|integer|min:1000000000|max:9999999999',
+            'end_at' => 'nullable|integer|min:1000000000|max:9999999999',
+            'limit' => 'nullable|integer|min:1|max:100',
+        ]);
+
+        if (!empty($params['start_at'])) {
+            $this->service->setStartAt($params['start_at']);
+        }
+        if (!empty($params['end_at'])) {
+            $this->service->setEndAt($params['end_at']);
+        }
+
+        return [
+            'data' => $this->service->getRanking($params['type'], $params['limit'] ?? 20),
+        ];
+    }
+
     /**
      * Get comprehensive statistics data including income, users, and growth rates
      */
     public function getStats()
+    {
+        return Cache::remember(
+            self::DASHBOARD_STATS_CACHE_KEY,
+            self::DASHBOARD_STATS_CACHE_SECONDS,
+            fn () => $this->buildStats()
+        );
+    }
+
+    private function buildStats(): array
     {
         $currentMonthStart = strtotime(date('Y-m-01'));
         $lastMonthStart = strtotime('-1 month', $currentMonthStart);
@@ -811,7 +927,8 @@ class StatController extends Controller
         $yesterdayStart = strtotime('-1 day', $todayStart);
 
         // 获取在线节点数
-        $onlineNodes = $this->getTotalNodesCount();
+        $nodeSummary = $this->getNodeSummary();
+        $onlineNodes = $nodeSummary['online'];
 
         $onlineSummary = $this->getOnlineUserSummary();
         $onlineDevices = $onlineSummary['devices'];
@@ -941,6 +1058,7 @@ class StatController extends Controller
 
                 // 节点相关
                 'onlineNodes' => $onlineNodes,
+                'totalNodes' => $nodeSummary['total'],
 
                 // 流量统计
                 'todayTraffic' => [
@@ -970,15 +1088,32 @@ class StatController extends Controller
      */
     public function getTrafficRank(Request $request)
     {
-        $request->validate([
+        $params = $request->validate([
             'type' => 'required|in:node,user',
             'start_time' => 'nullable|integer|min:1000000000|max:9999999999',
             'end_time' => 'nullable|integer|min:1000000000|max:9999999999'
         ]);
 
-        $type = $request->input('type');
-        $startDate = $request->input('start_time', strtotime('-7 days'));
-        $endDate = $request->input('end_time', time());
+        $type = $params['type'];
+        $startDate = (int) ($params['start_time'] ?? strtotime('-7 days'));
+        $endDate = (int) ($params['end_time'] ?? time());
+        $cacheBucket = intdiv($endDate, self::TRAFFIC_RANK_CACHE_SECONDS);
+        $cacheKey = sprintf(
+            'admin:dashboard:traffic-rank:v1:%s:%d:%d',
+            $type,
+            $startDate,
+            $cacheBucket
+        );
+
+        return Cache::remember(
+            $cacheKey,
+            self::TRAFFIC_RANK_CACHE_SECONDS,
+            fn () => $this->buildTrafficRank($type, $startDate, $endDate)
+        );
+    }
+
+    private function buildTrafficRank(string $type, int $startDate, int $endDate): array
+    {
         $previousStartDate = $startDate - ($endDate - $startDate);
         $previousEndDate = $startDate;
 

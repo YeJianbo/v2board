@@ -12,6 +12,7 @@ class VlessController extends Controller
 {
     public function save(Request $request)
     {
+        $metadata = $this->validateServerMetadata($request);
         $params = $request->validate([
             'group_id' => 'required',
             'route_id' => 'nullable|array',
@@ -107,6 +108,7 @@ class VlessController extends Controller
             }
             try {
                 $server->update($params);
+                $this->saveServerMetadata('vless', (int) $server->id, $metadata);
             } catch (\Exception $e) {
                 abort(500, '保存失败');
             }
@@ -115,9 +117,11 @@ class VlessController extends Controller
             ]);
         }
 
-        if (!ServerVless::create($params)) {
+        $server = ServerVless::create($params);
+        if (!$server) {
             abort(500, '创建失败');
         }
+        $this->saveServerMetadata('vless', (int) $server->id, $metadata);
 
         return response([
             'data' => true
@@ -132,9 +136,11 @@ class VlessController extends Controller
                 abort(500, '节点ID不存在');
             }
         }
-        return response([
-            'data' => $server->delete()
-        ]);
+        $deleted = $server->delete();
+        if ($deleted) {
+            $this->deleteServerMetadata('vless', (int) $server->id);
+        }
+        return response(['data' => $deleted]);
     }
 
     public function update(Request $request)
@@ -162,13 +168,15 @@ class VlessController extends Controller
     public function copy(Request $request)
     {
         $server = ServerVless::find($request->input('id'));
-        $server->show = 0;
         if (!$server) {
             abort(500, '服务器不存在');
         }
-        if (!ServerVless::create($server->toArray())) {
+        $server->show = 0;
+        $copiedServer = ServerVless::create($server->toArray());
+        if (!$copiedServer) {
             abort(500, '复制失败');
         }
+        $this->copyServerMetadata('vless', (int) $server->id, (int) $copiedServer->id);
 
         return response([
             'data' => true

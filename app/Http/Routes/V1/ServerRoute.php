@@ -23,8 +23,11 @@ class ServerRoute
                 'v2nodeconfig' => 'v2nodeConfig',
                 'unregister' => 'unregister',
                 'restartack' => 'restartAck',
+                'updateack' => 'updateAck',
                 'bbrack' => 'bbrAck',
                 'connectivitytestack' => 'connectivityTestAck',
+                'runtimetaskack' => 'runtimeTaskAck',
+                'networkquality' => 'networkQuality',
             ],
         ],
         'machineapi' => [

@@ -17,7 +17,10 @@ class NoticeSave extends FormRequest
             'title' => 'required',
             'content' => 'required',
             'img_url' => 'nullable|url',
-            'tags' => 'nullable|array'
+            'tags' => 'nullable|array',
+            'show' => 'nullable|boolean',
+            'popup' => 'nullable|boolean',
+            'sort' => 'nullable|integer',
         ];
     }
 

@@ -297,24 +297,36 @@ class UserController extends Controller
             unset($params['password']);
         }
         // 处理订阅计划
-        if (isset($params['plan_id'])) {
-            $plan = Plan::find($params['plan_id']);
-            if (!$plan) {
-                return $this->fail([400202, '订阅计划不存在']);
+        if (array_key_exists('plan_id', $params)) {
+            if ($params['plan_id'] === null) {
+                $params['group_id'] = null;
+            } else {
+                $plan = Plan::find($params['plan_id']);
+                if (!$plan) {
+                    return $this->fail([400202, '订阅计划不存在']);
+                }
+                $params['group_id'] = $plan->group_id;
             }
-            $params['group_id'] = $plan->group_id;
         }
         // 处理邀请用户
-        if ($request->input('invite_user_email') && $inviteUser = User::byEmail($request->input('invite_user_email'))->first()) {
-            $params['invite_user_id'] = $inviteUser->id;
-        } else {
-            $params['invite_user_id'] = null;
+        if (array_key_exists('invite_user_email', $params)) {
+            $inviteUserEmail = trim((string) ($params['invite_user_email'] ?? ''));
+            unset($params['invite_user_email']);
+
+            if ($inviteUserEmail === '') {
+                $params['invite_user_id'] = null;
+            } else {
+                $inviteUser = User::byEmail($inviteUserEmail)->first();
+                if (!$inviteUser) {
+                    return $this->fail([400202, '邀请人不存在']);
+                }
+                if ((int) $inviteUser->id === (int) $user->id) {
+                    return $this->fail([422, '不能将用户自己设为邀请人']);
+                }
+                $params['invite_user_id'] = $inviteUser->id;
+            }
         }
 
-        if (isset($params['banned']) && (int) $params['banned'] === 1) {
-            $authService = new AuthService($user);
-            $authService->removeAllSessions();
-        }
         if (isset($params['balance'])) {
             $params['balance'] = $params['balance'] * 100;
         }
@@ -323,6 +335,14 @@ class UserController extends Controller
         }
 
         $params = HookManager::filter('admin.user.update.params', $params, $request, $user);
+        $invalidateSessions = array_key_exists('password', $params);
+        foreach (['banned', 'is_admin', 'is_staff'] as $securityField) {
+            if (array_key_exists($securityField, $params)
+                && (int)$params[$securityField] !== (int)$user->{$securityField}) {
+                $invalidateSessions = true;
+                break;
+            }
+        }
 
         HookManager::call('admin.user.update.before', [
             'user' => $user,
@@ -332,6 +352,9 @@ class UserController extends Controller
 
         try {
             $user->update($params);
+            if ($invalidateSessions) {
+                (new AuthService($user))->removeAllSession();
+            }
         } catch (\Exception $e) {
             Log::error($e);
             return $this->fail([500, '保存失败']);
@@ -500,8 +523,9 @@ class UserController extends Controller
                 $users[] = $user;
             }
             DB::commit();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
+            Log::error('批量生成用户失败', ['exception' => $e]);
             return $this->fail([500, '生成失败']);
         }
 
@@ -581,8 +605,9 @@ class UserController extends Controller
                 $users[] = $user;
             }
             DB::commit();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
+            Log::error('按前缀批量生成用户失败', ['exception' => $e]);
             return $this->fail([500, '生成失败']);
         }
 
@@ -731,6 +756,35 @@ class UserController extends Controller
             return $this->fail([500, '处理失败']);
         }
         // Full refresh not implemented.
+        return $this->success(true);
+    }
+
+    public function setInviteUser(Request $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|exists:App\\Models\\User,id',
+            'invite_user_email' => 'nullable|email:strict',
+        ]);
+
+        $user = User::find($params['id']);
+        $inviteUserId = null;
+
+        if (!empty($params['invite_user_email'])) {
+            $inviteUser = User::byEmail($params['invite_user_email'])->first();
+            if (!$inviteUser) {
+                return $this->fail([400202, '邀请人不存在']);
+            }
+            if ((int) $inviteUser->id === (int) $user->id) {
+                return $this->fail([422, '不能将用户自己设为邀请人']);
+            }
+            $inviteUserId = (int) $inviteUser->id;
+        }
+
+        $user->invite_user_id = $inviteUserId;
+        if (!$user->save()) {
+            return $this->fail([500, '保存失败']);
+        }
+
         return $this->success(true);
     }
 

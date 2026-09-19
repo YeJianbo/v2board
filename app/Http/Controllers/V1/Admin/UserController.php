@@ -15,6 +15,7 @@ use App\Models\Plan;
 use App\Models\TicketMessage;
 use App\Models\User;
 use App\Services\AuthService;
+use App\Services\RavelCredentialService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,12 +25,29 @@ class UserController extends Controller
 {
     public function resetSecret(Request $request)
     {
-        $user = User::find($request->input('id'));
-        if (!$user) abort(500, '用户不存在');
-        $user->token = Helper::guid();
-        $user->uuid = Helper::guid(true);
+        try {
+            DB::transaction(function () use ($request) {
+                $user = User::query()
+                    ->whereKey($request->input('id'))
+                    ->lockForUpdate()
+                    ->first();
+                if (!$user) {
+                    abort(500, '用户不存在');
+                }
+                $user->token = Helper::guid();
+                $user->uuid = Helper::guid(true);
+                if (!$user->save()) {
+                    throw new \RuntimeException('保存失败');
+                }
+                (new RavelCredentialService())->revokeUser($user, true);
+            });
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            abort(500, '保存失败');
+        }
         return response([
-            'data' => $user->save()
+            'data' => true
         ]);
     }
 
@@ -139,31 +157,49 @@ class UserController extends Controller
         } else {
             unset($params['password']);
         }
-        if (isset($params['plan_id'])) {
-            $plan = Plan::find($params['plan_id']);
-            if (!$plan) {
-                abort(500, '订阅计划不存在');
+        if (array_key_exists('plan_id', $params)) {
+            if ($params['plan_id'] === null) {
+                $params['group_id'] = null;
+            } else {
+                $plan = Plan::find($params['plan_id']);
+                if (!$plan) {
+                    abort(500, '订阅计划不存在');
+                }
+                $params['group_id'] = $plan->group_id;
             }
-            $params['group_id'] = $plan->group_id;
-        } else {
-            $params['group_id'] = null;
         }
-        if ($request->input('invite_user_email')) {
-            $inviteUser = User::where('email', $request->input('invite_user_email'))->first();
-            if ($inviteUser) {
+        if (array_key_exists('invite_user_email', $params)) {
+            $inviteUserEmail = trim((string) ($params['invite_user_email'] ?? ''));
+            unset($params['invite_user_email']);
+
+            if ($inviteUserEmail === '') {
+                $params['invite_user_id'] = null;
+            } else {
+                $inviteUser = User::where('email', $inviteUserEmail)->first();
+                if (!$inviteUser) {
+                    abort(404, '邀请人不存在');
+                }
+                if ((int) $inviteUser->id === (int) $user->id) {
+                    abort(422, '不能将用户自己设为邀请人');
+                }
                 $params['invite_user_id'] = $inviteUser->id;
             }
-        } else {
-            $params['invite_user_id'] = null;
         }
 
-        if (isset($params['banned']) && (int)$params['banned'] === 1) {
-            $authService = new AuthService($user);
-            $authService->removeAllSession();
+        $invalidateSessions = array_key_exists('password', $params);
+        foreach (['banned', 'is_admin', 'is_staff'] as $securityField) {
+            if (array_key_exists($securityField, $params)
+                && (int)$params[$securityField] !== (int)$user->{$securityField}) {
+                $invalidateSessions = true;
+                break;
+            }
         }
 
         try {
             $user->update($params);
+            if ($invalidateSessions) {
+                (new AuthService($user))->removeAllSession();
+            }
         } catch (\Exception $e) {
             abort(500, '保存失败');
         }
@@ -389,5 +425,34 @@ class UserController extends Controller
         return response([
             'data' => true
         ]);
+    }
+
+    public function setInviteUser(Request $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|exists:App\\Models\\User,id',
+            'invite_user_email' => 'nullable|email:strict',
+        ]);
+
+        $user = User::find($params['id']);
+        $inviteUserId = null;
+
+        if (!empty($params['invite_user_email'])) {
+            $inviteUser = User::where('email', $params['invite_user_email'])->first();
+            if (!$inviteUser) {
+                abort(404, '邀请人不存在');
+            }
+            if ((int) $inviteUser->id === (int) $user->id) {
+                abort(422, '不能将用户自己设为邀请人');
+            }
+            $inviteUserId = (int) $inviteUser->id;
+        }
+
+        $user->invite_user_id = $inviteUserId;
+        if (!$user->save()) {
+            abort(500, '保存失败');
+        }
+
+        return response(['data' => true]);
     }
 }

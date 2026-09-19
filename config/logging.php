@@ -17,7 +17,7 @@ return [
     |
     */
 
-    'default' => 'mysql',
+    'default' => env('LOG_CHANNEL', 'stack'),
 
     'deprecations' => env('LOG_DEPRECATIONS_CHANNEL', 'null'),
 
@@ -44,8 +44,8 @@ return [
 
         'stack' => [
             'driver' => 'stack',
-            'channels' => ['daily'],
-            'ignore_exceptions' => false,
+            'channels' => ['mysql', 'daily'],
+            'ignore_exceptions' => true,
         ],
 
         'single' => [

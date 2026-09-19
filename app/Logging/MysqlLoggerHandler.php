@@ -18,6 +18,10 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
     private const SENSITIVE_KEYS = [
         'auth_data',
         'authorization',
+        'server_token',
+        'credentials',
+        'capability_key',
+        'capability-key',
         'access_token',
         'refresh_token',
         'user_token',
@@ -46,6 +50,15 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
         parent::__construct($level, $bubble);
     }
 
+    private function sanitizeRequestData(\Illuminate\Http\Request $request): array
+    {
+        $data = $request->all();
+        if (preg_match('~/agent/(start|chat)$~', $request->path()) && array_key_exists('message', $data)) {
+            $data['message'] = self::MASK;
+        }
+        return $this->sanitizeData($data);
+    }
+
     protected function write(array $record): void
     {
         if (self::$disabledUntil > time()) {
@@ -57,14 +70,14 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
                 $record['context']['exception'] = $this->sanitizeThrowable($record['context']['exception']);
             }
             $request = null;
-            if (app()->bound('request')) {
+            if (!app()->runningInConsole() && app()->bound('request')) {
                 try {
                     $request = app('request');
                 } catch (\Throwable $e) {
                     $request = null;
                 }
             }
-            $record['request_data'] = $request ? $this->sanitizeData($request->all() ?? []) : [];
+            $record['request_data'] = $request ? $this->sanitizeRequestData($request) : [];
             if (isset($record['context'])) {
                 $record['context'] = $this->sanitizeData($record['context']);
             }
@@ -236,6 +249,6 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
             return true;
         }
 
-        return preg_match('/(^|_)(password|passwd|pwd|token|secret|authorization|auth_data|api_?key|private_?key|obfs_?password|cf_?key)(_|$)/', $normalized) === 1;
+        return preg_match('/(^|_)(password|passwd|pwd|token|secret|authorization|auth_data|credentials|capability_?key|api_?key|private_?key|obfs_?password|cf_?key)(_|$)/', $normalized) === 1;
     }
 }

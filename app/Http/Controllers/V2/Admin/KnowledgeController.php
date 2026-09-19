@@ -20,7 +20,7 @@ class KnowledgeController extends Controller
                 return $this->fail([400202, '知识不存在']);
             return $this->success($knowledge->toArray());
         }
-        $data = Knowledge::select(['title', 'id', 'updated_at', 'category', 'show'])
+        $data = Knowledge::select(['title', 'id', 'updated_at', 'category', 'language', 'show', 'sort'])
             ->orderBy('sort', 'ASC')
             ->get();
         return $this->success($data);

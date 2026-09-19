@@ -2,6 +2,7 @@
 
 namespace App\Exceptions;
 
+use App\Services\Plugin\InterceptResponseException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Support\Arr;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -16,7 +17,7 @@ class Handler extends ExceptionHandler
      * @var array
      */
     protected $dontReport = [
-        //
+        InterceptResponseException::class,
     ];
 
     /**
@@ -57,6 +58,13 @@ class Handler extends ExceptionHandler
             abort(500, "主题渲染失败。如更新主题，参数可能发生变化请重新配置主题后再试。");
         }
         return parent::render($request, $exception);
+    }
+
+    public function register(): void
+    {
+        $this->renderable(function (InterceptResponseException $exception) {
+            return $exception->getResponse();
+        });
     }
 
 

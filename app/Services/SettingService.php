@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\Setting as SettingModel;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class SettingService
 {
@@ -28,10 +28,10 @@ class SettingService
 
         try {
             $settings = $this->settingsCache()->rememberForever(self::CACHE_KEY, function (): array {
-                return SettingModel::pluck('value', 'name')->toArray();
+                return DB::table('v2_settings')->pluck('value', 'name')->toArray();
             });
         } catch (\Throwable $e) {
-            $settings = SettingModel::pluck('value', 'name')->toArray();
+            return $this->loadedSettings = [];
         }
 
         return $this->loadedSettings = is_array($settings) ? $settings : [];
@@ -56,5 +56,18 @@ class SettingService
     public function getAll()
     {
         return $this->load();
+    }
+
+    public function getBatch(array $names): array
+    {
+        $settings = $this->load();
+        $result = [];
+        foreach ($names as $name) {
+            if (array_key_exists($name, $settings)) {
+                $result[$name] = $settings[$name];
+            }
+        }
+
+        return $result;
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Protocols;
 
+use App\Models\SubscribeTemplate;
 use App\Utils\Helper;
 use phpDocumentor\Reflection\Types\Self_;
 use Symfony\Component\Yaml\Yaml;
@@ -32,13 +33,7 @@ class Clash
             header('support-url: ' . $appUrl);
         }
         header("content-disposition:attachment;filename*=UTF-8''".rawurlencode($appName));
-        $defaultConfig = base_path() . '/resources/rules/default.clash.yaml';
-        $customConfig = base_path() . '/resources/rules/custom.clash.yaml';
-        if (\File::exists($customConfig)) {
-            $config = Yaml::parseFile($customConfig);
-        } else {
-            $config = Yaml::parseFile($defaultConfig);
-        }
+        $config = SubscribeTemplate::parseYaml('clash');
         $proxy = [];
         $proxies = [];
 

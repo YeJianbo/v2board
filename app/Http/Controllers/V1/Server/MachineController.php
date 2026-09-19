@@ -4,6 +4,8 @@ namespace App\Http\Controllers\V1\Server;
 
 use App\Http\Controllers\Controller;
 use App\Models\Machine;
+use App\Models\MachineNetworkQuality;
+use App\Models\MachineUpdateLog;
 use App\Models\ServerVmess;
 use App\Models\ServerTrojan;
 use App\Models\ServerShadowsocks;
@@ -12,6 +14,9 @@ use App\Models\ServerHysteria;
 use App\Models\ServerTuic;
 use App\Models\ServerV2node;
 use App\Services\SettingService;
+use App\Services\MachineMetricService;
+use App\Services\MachineRuntimeStreamService;
+use App\Services\TelegramNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
@@ -30,14 +35,23 @@ class MachineController extends Controller
     private const ENROLL_TOKEN_DEFAULT_MAX_USES = 100;
 
     private array $panelSettingCache = [];
+    private $probeCacheRepository = null;
 
     private function probeCache()
     {
-        try {
-            return Cache::store('redis');
-        } catch (\Throwable $e) {
-            return Cache::store(config('cache.default', 'file'));
+        if ($this->probeCacheRepository !== null) {
+            return $this->probeCacheRepository;
         }
+
+        try {
+            $cache = Cache::store('redis');
+            $cache->get('machine:cache:connection-check');
+            $this->probeCacheRepository = $cache;
+        } catch (\Throwable $e) {
+            $this->probeCacheRepository = Cache::store('file');
+        }
+
+        return $this->probeCacheRepository;
     }
 
     private function panelSetting(string $key, $default = null)
@@ -105,6 +119,18 @@ class MachineController extends Controller
                         'ddns_api_token',
                         'relay_rules',
                         'probe_auto_update',
+                        'maintenance_until',
+                        'maintenance_note',
+                        'network_quality_enabled',
+                        'network_quality_interval',
+                        'network_quality_targets',
+                        'traffic_alert_enabled',
+                        'traffic_alert_bytes',
+                        'traffic_alert_window',
+                        'traffic_reset_mode',
+                        'traffic_reset_day',
+                        'traffic_reset_hour',
+                        'traffic_reset_minute',
                         'updated_at',
                     ])
                     ->whereKey($machineId)
@@ -120,10 +146,14 @@ class MachineController extends Controller
 
     private function authenticateSignedRequest(Request $request)
     {
-        $machineId = $request->header('X-V2Node-Machine-Id');
-        $timestamp = $request->header('X-V2Node-Timestamp');
-        $nonce = $request->header('X-V2Node-Nonce');
-        $signature = $request->header('X-V2Node-Signature');
+        $headerPrefix = 'X-V2Node';
+        if (!$request->header('X-V2Node-Machine-Id') && $request->header('X-Ravel-Machine-Id')) {
+            $headerPrefix = 'X-Ravel';
+        }
+        $machineId = $request->header($headerPrefix . '-Machine-Id');
+        $timestamp = $request->header($headerPrefix . '-Timestamp');
+        $nonce = $request->header($headerPrefix . '-Nonce');
+        $signature = $request->header($headerPrefix . '-Signature');
 
         if (!$machineId && !$timestamp && !$nonce && !$signature) {
             return null;
@@ -158,13 +188,12 @@ class MachineController extends Controller
 
         $bodyHash = hash('sha256', (string) $request->getContent());
         $path = '/' . ltrim($request->getPathInfo(), '/');
-        $payload = implode("\n", [
-            strtoupper($request->method()),
-            $path,
-            (string) $timestamp,
-            $nonce,
-            $bodyHash,
-        ]);
+        $payloadParts = [strtoupper($request->method()), $path];
+        if ($headerPrefix === 'X-Ravel') {
+            $payloadParts[] = (string) ($request->getQueryString() ?: '');
+        }
+        array_push($payloadParts, (string) $timestamp, $nonce, $bodyHash);
+        $payload = implode("\n", $payloadParts);
         $expected = hash_hmac('sha256', $payload, $machine->api_token);
 
         if (!hash_equals($expected, strtolower((string) $signature))) {
@@ -319,11 +348,15 @@ class MachineController extends Controller
         $status = $this->decodeMachineStatus($machine);
         $previousStatus = $status;
         $previousReportedAt = (int) ($status['reported_at'] ?? 0);
+        $previousTrafficReportedAt = (int) ($status['traffic_reported_at'] ?? 0);
         $now = time();
         $remoteIp = $this->resolveRequestRemoteIp($request);
         $reportedIp = trim((string) ($extraStatus['ip'] ?? ($status['ip'] ?? '')));
         $primaryIp = $this->resolvePrimaryIp($reportedIp, $remoteIp);
         $previousPrimaryIp = trim((string) ($status['primary_ip'] ?? ''));
+        $trafficDeltas = ['net_in' => 0, 'net_out' => 0];
+        $hasTrafficSample = false;
+        $trafficElapsed = $previousTrafficReportedAt > 0 ? $now - $previousTrafficReportedAt : 0;
 
         foreach ([
             'net_in' => 'net_in_rate',
@@ -333,15 +366,24 @@ class MachineController extends Controller
                 continue;
             }
 
+            $hasTrafficSample = true;
             $currentTotal = (float) $extraStatus[$totalKey];
             $previousTotal = isset($status[$totalKey]) && is_numeric($status[$totalKey])
                 ? (float) $status[$totalKey]
                 : null;
-            $elapsed = $previousReportedAt > 0 ? $now - $previousReportedAt : 0;
+            $status[$rateKey] = 0;
 
-            if ($previousTotal !== null && $elapsed > 0 && $elapsed <= 600) {
-                $status[$rateKey] = round(max(0, $currentTotal - $previousTotal) / $elapsed, 2);
+            if ($previousTotal !== null && $currentTotal >= $previousTotal) {
+                $delta = max(0, $currentTotal - $previousTotal);
+                $trafficDeltas[$totalKey] = (int) round($delta);
+                if ($trafficElapsed > 0 && $trafficElapsed <= 600) {
+                    $status[$rateKey] = round($delta / $trafficElapsed, 2);
+                }
             }
+        }
+
+        if ($hasTrafficSample) {
+            $status['traffic_reported_at'] = $now;
         }
 
         if ($remoteIp !== '') {
@@ -373,8 +415,33 @@ class MachineController extends Controller
             }
         }
 
+        $status = \App\Services\MachineRuntimeTaskState::separateLegacyQueryError($status);
+        $this->recordAutomaticProbeVersionChange($machine, $previousStatus, $status, $now);
         $status = $this->syncMachineDdns($machine, $status);
         $this->probeCache()->put($machine->statusCacheKey(), $status, 86400 * 7);
+        Machine::forgetPublicStatusCache();
+
+        try {
+            app(MachineMetricService::class)->record($machine, $status, $now);
+        } catch (\Throwable $e) {
+            \Log::warning('主机资源历史采样失败', [
+                'machine_id' => (int) $machine->id,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
+        if (($trafficDeltas['net_in'] + $trafficDeltas['net_out']) > 0) {
+            try {
+                app(TelegramNotificationService::class)->recordMachineTraffic(
+                    $machine,
+                    $trafficDeltas['net_in'],
+                    $trafficDeltas['net_out'],
+                    $now
+                );
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
 
         $forcePersist = $previousReportedAt <= 0
             || ($now - $previousReportedAt) >= self::PROBE_STATUS_PERSIST_INTERVAL_SECONDS
@@ -395,6 +462,37 @@ class MachineController extends Controller
         $machine->updated_at = $now;
     }
 
+    private function recordAutomaticProbeVersionChange(
+        Machine $machine,
+        array $previousStatus,
+        array $status,
+        int $recordedAt
+    ): void {
+        $previousVersion = trim((string) ($previousStatus['v2node_version'] ?? ''));
+        $currentVersion = trim((string) ($status['v2node_version'] ?? ''));
+        if ($previousVersion === '' || $currentVersion === '' || $previousVersion === $currentVersion) {
+            return;
+        }
+
+        $manualUpdateStatus = strtolower(trim((string) ($previousStatus['probe_update_action_status'] ?? '')));
+        if (in_array($manualUpdateStatus, ['pending', 'running'], true)) {
+            return;
+        }
+
+        MachineUpdateLog::create([
+            'machine_id' => (int) $machine->id,
+            'request_id' => 'auto-' . $recordedAt . '-' . Str::random(12),
+            'source' => $machine->probe_auto_update ? 'auto' : 'detected',
+            'target_version' => $currentVersion,
+            'installed_version' => $currentVersion,
+            'status' => 'success',
+            'requested_at' => $recordedAt,
+            'started_at' => $recordedAt,
+            'completed_at' => $recordedAt,
+            'expires_at' => 0,
+        ]);
+    }
+
     private function hasMachineStatusCriticalChanges(array $before, array $after): bool
     {
         $criticalKeys = [
@@ -407,6 +505,7 @@ class MachineController extends Controller
             'v2node_status',
             'gost_status',
             'gost_version',
+			'gost_error',
             'listen_ports',
             'listen_processes',
             'ddns_host',
@@ -1145,6 +1244,7 @@ class MachineController extends Controller
             'v2node_status',
             'gost_status',
             'gost_version',
+            'gost_error',
             'listen_ports',
             'listen_processes',
             'virtualization',
@@ -1157,6 +1257,14 @@ class MachineController extends Controller
             'public_ipv6',
             'primary_ipv4',
             'primary_ipv6',
+            'v2node_version',
+            'config_desired_revision',
+            'config_applied_revision',
+            'config_apply_status',
+            'config_apply_error',
+            'runtime_health',
+            'runtime_error',
+            'network_rate_interfaces',
         ];
         $numericStatusKeys = [
             'load1',
@@ -1178,6 +1286,7 @@ class MachineController extends Controller
             'docker_running',
             'docker_images',
             'gost_rule_count',
+            'config_apply_at',
         ];
 
         $status = [
@@ -1198,6 +1307,25 @@ class MachineController extends Controller
             'ddns_error' => array_key_exists('ddns_error', $data) ? trim((string) $data['ddns_error']) : null,
         ];
 
+        if (array_key_exists('net_rx_rate', $data) && is_numeric($data['net_rx_rate'])) {
+            $status['net_in_rate'] = max(0, (float) $data['net_rx_rate']);
+        }
+        if (array_key_exists('net_tx_rate', $data) && is_numeric($data['net_tx_rate'])) {
+            $status['net_out_rate'] = max(0, (float) $data['net_tx_rate']);
+        }
+        if (array_key_exists('net_rx_peak_rate', $data) && is_numeric($data['net_rx_peak_rate'])) {
+            $status['net_in_sample_peak'] = max(0, (float) $data['net_rx_peak_rate']);
+        }
+        if (array_key_exists('net_tx_peak_rate', $data) && is_numeric($data['net_tx_peak_rate'])) {
+            $status['net_out_sample_peak'] = max(0, (float) $data['net_tx_peak_rate']);
+        }
+
+        // A push is a fresh address snapshot. Heartbeat-only requests keep the snapshot.
+        // Older reporters omit these aliases; retaining them mixes old and current IPs.
+        foreach (['ipv4', 'ipv6', 'public_ipv4', 'public_ipv6', 'primary_ipv4', 'primary_ipv6'] as $key) {
+            $status[$key] = null;
+        }
+
         foreach ($numericStatusKeys as $key) {
             if (array_key_exists($key, $data) && is_numeric($data[$key])) {
                 $status[$key] = $data[$key] + 0;
@@ -1209,11 +1337,29 @@ class MachineController extends Controller
                 $status[$key] = mb_substr(trim((string) $data[$key]), 0, 255);
             }
         }
+
+        if (isset($data['node_health']) && is_array($data['node_health'])) {
+            $status['node_health'] = $this->normalizeNodeHealth($data['node_health']);
+        }
+        if (isset($data['gost_rule_health']) && is_array($data['gost_rule_health'])) {
+            $status['gost_rule_health'] = $this->normalizeGostRuleHealth($data['gost_rule_health']);
+        }
         
+        $runtimeStreamService = new MachineRuntimeStreamService($this->probeCache());
+        if (isset($data['runtime_stream']) && is_array($data['runtime_stream'])) {
+            $runtimeStreamService->append((int) $machine->id, [
+                'session_id' => mb_substr(trim((string) ($data['runtime_stream']['session_id'] ?? '')), 0, 64),
+                'logs' => (string) ($data['runtime_stream']['logs'] ?? ''),
+                'error' => mb_substr(trim((string) ($data['runtime_stream']['error'] ?? '')), 0, 255),
+                'collected_at' => (int) ($data['runtime_stream']['collected_at'] ?? time()),
+            ]);
+        }
+
         $this->touchMachineHeartbeat($machine, $request, $status);
 
         return response()->json([
-            'data' => 'success'
+            'data' => 'success',
+            'runtime_stream' => $runtimeStreamService->activeForMachine((int) $machine->id),
         ]);
     }
 
@@ -1337,21 +1483,106 @@ class MachineController extends Controller
 
         $restartToken = $this->probeCache()->get('v2node_probe_restart:' . $machine->id);
         $enableBbrToken = $this->probeCache()->get('v2node_probe_enable_bbr:' . $machine->id);
+        $updateRequestKey = 'v2node_probe_update:' . $machine->id;
+        $updateRequest = $this->probeCache()->get($updateRequestKey);
+        $updateStatusChanged = false;
+        if (!is_array($updateRequest) || (int) ($updateRequest['expires_at'] ?? 0) <= time()) {
+            if ($updateRequest) {
+                $this->probeCache()->forget($updateRequestKey);
+            }
+            $persistedRequestId = trim((string) ($status['probe_update_request_id'] ?? ''));
+            $persistedExpiresAt = (int) ($status['probe_update_request_expires_at'] ?? 0);
+            $persistedActionStatus = strtolower(trim((string) ($status['probe_update_action_status'] ?? '')));
+            if ($persistedRequestId !== ''
+                && $persistedExpiresAt > time()
+                && in_array($persistedActionStatus, ['pending', 'running'], true)
+            ) {
+                $updateRequest = [
+                    'request_id' => $persistedRequestId,
+                    'target_version' => trim((string) ($status['probe_update_requested_version'] ?? '')),
+                    'requested_at' => (int) ($status['probe_update_action_at'] ?? time()),
+                    'expires_at' => $persistedExpiresAt,
+                ];
+                $this->probeCache()->put(
+                    $updateRequestKey,
+                    $updateRequest,
+                    max(1, $persistedExpiresAt - time())
+                );
+            } else {
+                $updateRequest = null;
+                if ($persistedRequestId !== ''
+                    && $persistedExpiresAt > 0
+                    && $persistedExpiresAt <= time()
+                    && in_array($persistedActionStatus, ['pending', 'running'], true)
+                ) {
+                    $status['probe_update_action_status'] = 'failed';
+                    $status['probe_update_action_at'] = time();
+                    $status['probe_update_action_error'] = '更新请求超时，机器未在有效期内完成更新';
+                    MachineUpdateLog::query()
+                        ->where('machine_id', $machine->id)
+                        ->where('request_id', $persistedRequestId)
+                        ->whereIn('status', ['pending', 'running'])
+                        ->update([
+                            'status' => 'failed',
+                            'error' => '更新请求超时，机器未在有效期内完成更新',
+                            'completed_at' => time(),
+                            'updated_at' => time(),
+                        ]);
+                    unset(
+                        $status['probe_update_request_id'],
+                        $status['probe_update_requested_version'],
+                        $status['probe_update_request_expires_at']
+                    );
+                    $updateStatusChanged = true;
+                }
+            }
+        }
+        if (is_array($updateRequest)
+            && strtolower(trim((string) ($status['probe_update_action_status'] ?? ''))) === 'pending'
+        ) {
+            $status['probe_update_action_status'] = 'running';
+            $status['probe_update_action_at'] = time();
+            MachineUpdateLog::query()
+                ->where('machine_id', $machine->id)
+                ->where('request_id', (string) ($updateRequest['request_id'] ?? ''))
+                ->where('status', 'pending')
+                ->update([
+                    'status' => 'running',
+                    'started_at' => time(),
+                    'updated_at' => time(),
+                ]);
+            $updateStatusChanged = true;
+        }
+        if ($updateStatusChanged) {
+            $machine->status = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $machine->save();
+            $this->probeCache()->put($machine->statusCacheKey(), $status, 86400 * 7);
+            Machine::forgetPublicStatusCache();
+        }
         $ddnsHost = $this->resolveDdnsHost($machine);
         $currentIp = trim((string) ($status['primary_ip'] ?? $status['remote_ip'] ?? $status['ip'] ?? ''));
         $manualRelayRules = $this->filterDeployableRelayRules($this->buildMachineRelayRules($machine), $status);
+        $relayRules = array_values(array_merge(
+            $manualRelayRules,
+            $this->buildProbeRelayRules($machine, $manualRelayRules)
+        ));
+        $nodePayload = $nodes->all();
+        $configRevision = hash('sha256', json_encode([
+            'nodes' => $nodePayload,
+            'relay' => ['rules' => $relayRules],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
-            'data' => $nodes,
+            'data' => $nodePayload,
+            'config_schema' => 1,
+            'config_revision' => $configRevision,
+            'authoritative' => true,
             'restart_v2node_token' => $restartToken ?: '',
             'enable_bbr_token' => $enableBbrToken ?: '',
             'probe' => [
                 'firewall_rules' => $this->buildProbeFirewallRules($machine, $machineServers),
                 'relay' => [
-                    'rules' => array_values(array_merge(
-                        $manualRelayRules,
-                        $this->buildProbeRelayRules($machine, $manualRelayRules)
-                    )),
+                    'rules' => $relayRules,
                 ],
                 'ddns' => [
                     'enabled' => false,
@@ -1368,11 +1599,23 @@ class MachineController extends Controller
                     'last_synced_at' => !empty($status['ddns_synced_at']) ? (int) $status['ddns_synced_at'] : 0,
                 ],
                 'auto_update' => [
-                    'enabled' => (bool) $machine->probe_auto_update,
+                    // Let an older Ravel bootstrap to the release that understands manual requests.
+                    'enabled' => (bool) $machine->probe_auto_update || is_array($updateRequest),
                     'interval_seconds' => self::PROBE_AUTO_UPDATE_INTERVAL_SECONDS,
                     'repo' => 'YeJianbo/v2node',
+                    'request_id' => (string) ($updateRequest['request_id'] ?? ''),
+                    'target_version' => (string) ($updateRequest['target_version'] ?? ''),
+                    'requested_at' => (int) ($updateRequest['requested_at'] ?? 0),
+                ],
+                'network_quality' => [
+                    'enabled' => (bool) $machine->network_quality_enabled,
+                    'interval_seconds' => max(60, min(3600, (int) ($machine->network_quality_interval ?: 300))),
+                    'packet_count' => 5,
+                    'timeout_seconds' => 2,
+                    'targets' => $machine->resolvedNetworkQualityTargets(),
                 ],
                 'connectivity_test_task' => $this->buildProbeConnectivityTask($machine),
+                'runtime_task' => $this->buildProbeRuntimeTask($machine),
             ],
         ]);
     }
@@ -1386,6 +1629,82 @@ class MachineController extends Controller
         return response()->json([
             'data' => 'success',
         ]);
+    }
+
+    public function networkQuality(Request $request)
+    {
+        $machine = $this->authenticate($request);
+        $machine = Machine::findOrFail((int) $machine->id);
+        if (!$machine->network_quality_enabled) {
+            return response()->json(['data' => ['accepted' => false]]);
+        }
+
+        $targets = collect($machine->resolvedNetworkQualityTargets())
+            ->filter(fn ($target) => ($target['enabled'] ?? true) === true)
+            ->keyBy('key');
+        $params = $request->validate([
+            'samples' => 'required|array|min:1|max:8',
+            'samples.*.key' => 'required|string|max:32',
+            'samples.*.sent' => 'required|integer|min:1|max:20',
+            'samples.*.received' => 'required|integer|min:0|max:20',
+            'samples.*.packet_loss' => 'required|numeric|min:0|max:100',
+            'samples.*.latency_min' => 'nullable|numeric|min:0|max:60000',
+            'samples.*.latency_avg' => 'nullable|numeric|min:0|max:60000',
+            'samples.*.latency_max' => 'nullable|numeric|min:0|max:60000',
+        ]);
+
+        if (count($params['samples']) !== $targets->count()) {
+            abort(422, '网络质量目标数量与面板配置不一致');
+        }
+
+        $now = time();
+        $seen = [];
+        $rows = [];
+        foreach ($params['samples'] as $sample) {
+            $key = (string) $sample['key'];
+            if (isset($seen[$key])) {
+                abort(422, '网络质量数据包含重复目标');
+            }
+            $seen[$key] = true;
+            $target = $targets->get($key);
+            if (!$target) {
+                abort(422, '网络质量数据包含未知目标');
+            }
+            $sent = (int) $sample['sent'];
+            $received = min($sent, (int) $sample['received']);
+            $rows[] = [
+                'machine_id' => (int) $machine->id,
+                'target_key' => $key,
+                'target_name' => $target['name'],
+                'target_host' => $target['host'],
+                'probe_type' => $target['probe_type'] ?? 'icmp',
+                'target_port' => (int) ($target['port'] ?? 80),
+                'ip_version' => $target['ip_version'] ?? 'auto',
+                'sent' => $sent,
+                'received' => $received,
+                'packet_loss' => round((float) $sample['packet_loss'], 2),
+                'latency_min' => $received > 0 ? ($sample['latency_min'] ?? null) : null,
+                'latency_avg' => $received > 0 ? ($sample['latency_avg'] ?? null) : null,
+                'latency_max' => $received > 0 ? ($sample['latency_max'] ?? null) : null,
+                'recorded_at' => $now,
+                'created_at' => $now,
+            ];
+        }
+
+        MachineNetworkQuality::query()->insert($rows);
+        try {
+            app(TelegramNotificationService::class)->handleNetworkQualitySamples($machine, $rows);
+        } catch (\Throwable $e) {
+            \Log::warning('Telegram网络质量告警处理失败', [
+                'machine_id' => (int) $machine->id,
+                'message' => $e->getMessage(),
+            ]);
+        }
+        if ($this->probeCache()->add('machine_network_quality_prune', true, 86400)) {
+            MachineNetworkQuality::query()->where('recorded_at', '<', now()->subDays(31)->timestamp)->delete();
+        }
+
+        return response()->json(['data' => ['accepted' => true, 'recorded_at' => $now]]);
     }
 
     public function restartAck(Request $request)
@@ -1440,6 +1759,97 @@ class MachineController extends Controller
         $machine->status = $encodedStatus;
         $machine->save();
         $this->probeCache()->put($machine->statusCacheKey(), $status, 86400 * 7);
+        Machine::forgetPublicStatusCache();
+
+        return response()->json([
+            'data' => 'success',
+        ]);
+    }
+
+    public function updateAck(Request $request)
+    {
+        $machine = $this->authenticate($request);
+        $this->touchMachineHeartbeat($machine, $request);
+        $params = $request->validate([
+            'request_id' => 'required|string|max:64',
+            'status' => 'required|string|in:success,failed',
+            'target_version' => 'nullable|string|max:64',
+            'installed_version' => 'nullable|string|max:64',
+            'error' => 'nullable|string|max:255',
+        ]);
+
+        $cacheKey = 'v2node_probe_update:' . $machine->id;
+        $updateRequest = $this->probeCache()->get($cacheKey);
+        $status = $this->decodeMachineStatus($machine);
+        if (!is_array($updateRequest) || !hash_equals(
+            (string) ($updateRequest['request_id'] ?? ''),
+            (string) $params['request_id']
+        )) {
+            $persistedRequestId = (string) ($status['probe_update_request_id'] ?? '');
+            if ($persistedRequestId === '' || !hash_equals($persistedRequestId, (string) $params['request_id'])) {
+                abort(404, 'Update request not found');
+            }
+            $updateRequest = [
+                'request_id' => $persistedRequestId,
+                'target_version' => trim((string) ($status['probe_update_requested_version'] ?? '')),
+            ];
+        }
+
+        $this->probeCache()->forget($cacheKey);
+
+        $actionStatus = (string) $params['status'];
+        $targetVersion = trim((string) ($updateRequest['target_version'] ?? $params['target_version'] ?? ''));
+        $installedVersion = trim((string) ($params['installed_version'] ?? ''));
+        $actionError = trim((string) ($params['error'] ?? ''));
+
+        $status['probe_update_action_status'] = $actionStatus;
+        $status['probe_update_action_at'] = time();
+        $status['probe_update_target_version'] = $targetVersion !== '' ? $targetVersion : 'latest';
+        $status['probe_update_last_request_id'] = (string) $params['request_id'];
+        unset(
+            $status['probe_update_request_id'],
+            $status['probe_update_requested_version'],
+            $status['probe_update_request_expires_at']
+        );
+        if ($installedVersion !== '') {
+            $status['probe_update_installed_version'] = $installedVersion;
+            if ($actionStatus === 'success') {
+                $status['v2node_version'] = $installedVersion;
+            }
+        }
+        if ($actionStatus === 'failed' && $actionError !== '') {
+            $status['probe_update_action_error'] = mb_substr($actionError, 0, 255);
+        } else {
+            unset($status['probe_update_action_error']);
+        }
+
+        $updateLog = MachineUpdateLog::query()
+            ->where('machine_id', $machine->id)
+            ->where('request_id', (string) $params['request_id'])
+            ->first();
+        if (!$updateLog) {
+            $updateLog = new MachineUpdateLog([
+                'machine_id' => (int) $machine->id,
+                'request_id' => (string) $params['request_id'],
+                'source' => 'unknown',
+                'requested_at' => (int) ($status['probe_update_action_at'] ?? time()),
+                'started_at' => 0,
+                'expires_at' => 0,
+            ]);
+        }
+        $updateLog->target_version = $targetVersion !== '' ? $targetVersion : 'latest';
+        $updateLog->installed_version = $installedVersion !== '' ? $installedVersion : null;
+        $updateLog->status = $actionStatus;
+        $updateLog->error = $actionStatus === 'failed' && $actionError !== ''
+            ? mb_substr($actionError, 0, 255)
+            : null;
+        $updateLog->completed_at = time();
+        $updateLog->save();
+
+        $machine->status = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $machine->save();
+        $this->probeCache()->put($machine->statusCacheKey(), $status, 86400 * 7);
+        Machine::forgetPublicStatusCache();
 
         return response()->json([
             'data' => 'success',
@@ -1498,6 +1908,61 @@ class MachineController extends Controller
         ]);
     }
 
+    public function runtimeTaskAck(Request $request)
+    {
+        $machine = $this->authenticate($request);
+        $this->touchMachineHeartbeat($machine, $request);
+        $params = $request->validate([
+            'task_id' => 'required|string|max:64',
+            'service' => 'required|string|in:ravel,gost',
+            'action' => 'required|string|in:logs,status,start,stop,restart,reload',
+            'status' => 'required|string|in:success,failed',
+            'message' => 'nullable|string|max:255',
+            'service_status' => 'nullable|string|max:64',
+            'exit_code' => 'nullable|integer|min:-1|max:255',
+            'logs' => 'nullable|string|max:32768',
+            'executed_at' => 'nullable|integer|min:0',
+        ]);
+
+        $taskKey = 'v2node_probe_runtime_task:' . $machine->id;
+        $task = $this->probeCache()->get($taskKey);
+        if (!is_array($task) || !hash_equals((string) ($task['task_id'] ?? ''), (string) $params['task_id'])) {
+            abort(404, 'Runtime task not found');
+        }
+        if ((string) ($task['service'] ?? '') !== (string) $params['service']
+            || (string) ($task['action'] ?? '') !== (string) $params['action']) {
+            abort(422, 'Runtime task result does not match request');
+        }
+
+        $now = time();
+        $result = array_merge($task, [
+            'status' => (string) $params['status'],
+            'message' => trim((string) ($params['message'] ?? '')),
+            'service_status' => trim((string) ($params['service_status'] ?? '')),
+            'exit_code' => array_key_exists('exit_code', $params) ? (int) $params['exit_code'] : null,
+            'logs' => (string) ($params['logs'] ?? ''),
+            'executed_at' => (int) ($params['executed_at'] ?? $now),
+            'updated_at' => $now,
+        ]);
+        if ($result['message'] === '') {
+            $result['message'] = $result['status'] === 'success' ? '运行任务执行成功' : '运行任务执行失败';
+        }
+
+        $this->probeCache()->put(
+            'v2node_probe_runtime_result:' . $params['task_id'],
+            $result,
+            600
+        );
+        $this->probeCache()->forget($taskKey);
+
+        $status = \App\Services\MachineRuntimeTaskState::apply($this->decodeMachineStatus($machine), $result, $now);
+        $machine->status = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $machine->save();
+        $this->probeCache()->put($machine->statusCacheKey(), $status, 86400 * 7);
+
+        return response()->json(['data' => 'success']);
+    }
+
     private function buildProbeConnectivityTask(Machine $machine): ?array
     {
         $cacheKey = 'v2node_probe_connectivity_task:' . $machine->id;
@@ -1513,5 +1978,96 @@ class MachineController extends Controller
         }
 
         return $task['connectivity_test_task'] ?? null;
+    }
+
+    private function normalizeNodeHealth(array $records): array
+    {
+        $normalized = [];
+        foreach (array_slice($records, 0, 256) as $record) {
+            if (!is_array($record)) {
+                continue;
+            }
+            $nodeId = (int) ($record['node_id'] ?? 0);
+            if ($nodeId <= 0) {
+                continue;
+            }
+            $status = strtolower(trim((string) ($record['status'] ?? 'unknown')));
+            if (!in_array($status, ['running', 'failed', 'unknown'], true)) {
+                $status = 'unknown';
+            }
+            $normalized[] = [
+                'node_id' => $nodeId,
+                'protocol' => mb_substr(strtolower(trim((string) ($record['protocol'] ?? ''))), 0, 32),
+                'status' => $status,
+                'listen_ok' => !empty($record['listen_ok']) ? 1 : 0,
+                'message' => mb_substr(trim((string) ($record['message'] ?? '')), 0, 255),
+                'checked_at' => max(0, (int) ($record['checked_at'] ?? 0)),
+                'server_port' => min(65535, max(0, (int) ($record['server_port'] ?? 0))),
+            ];
+        }
+        return $normalized;
+    }
+
+    private function normalizeGostRuleHealth(array $records): array
+    {
+        $normalized = [];
+        foreach (array_slice($records, 0, 512) as $record) {
+            if (!is_array($record)) {
+                continue;
+            }
+            $protocol = strtolower(trim((string) ($record['protocol'] ?? '')));
+            $listenPort = (int) ($record['listen_port'] ?? 0);
+            if (!in_array($protocol, ['tcp', 'udp'], true) || $listenPort < 1 || $listenPort > 65535) {
+                continue;
+            }
+            $status = strtolower(trim((string) ($record['status'] ?? 'unknown')));
+            if (!in_array($status, ['running', 'failed', 'inactive', 'unknown'], true)) {
+                $status = 'unknown';
+            }
+            $targetStatus = strtolower(trim((string) ($record['target_status'] ?? '')));
+            if (!in_array($targetStatus, ['', 'pending', 'reachable', 'unreachable', 'not_applicable'], true)) {
+                $targetStatus = '';
+            }
+            $item = [
+                'protocol' => $protocol,
+                'listen_host' => mb_substr(trim((string) ($record['listen_host'] ?? '0.0.0.0')), 0, 255),
+                'listen_port' => $listenPort,
+                'status' => $status,
+                'listen_ok' => !empty($record['listen_ok']) ? 1 : 0,
+                'message' => mb_substr(trim((string) ($record['message'] ?? '')), 0, 255),
+                'checked_at' => max(0, (int) ($record['checked_at'] ?? 0)),
+                'target_status' => $targetStatus,
+                'target_message' => mb_substr(trim((string) ($record['target_message'] ?? '')), 0, 255),
+                'target_checked_at' => max(0, (int) ($record['target_checked_at'] ?? 0)),
+            ];
+            if (array_key_exists('target_ok', $record)) {
+                $item['target_ok'] = !empty($record['target_ok']) ? 1 : 0;
+            }
+            $normalized[] = $item;
+        }
+        return $normalized;
+    }
+
+    private function buildProbeRuntimeTask(Machine $machine): ?array
+    {
+        $cacheKey = 'v2node_probe_runtime_task:' . $machine->id;
+        $task = $this->probeCache()->get($cacheKey);
+        if (!is_array($task)) {
+            return null;
+        }
+
+        if ((int) ($task['expires_at'] ?? 0) <= time()) {
+            $this->probeCache()->forget($cacheKey);
+            return null;
+        }
+
+        return [
+            'task_id' => (string) ($task['task_id'] ?? ''),
+            'service' => (string) ($task['service'] ?? ''),
+            'action' => (string) ($task['action'] ?? ''),
+            'lines' => (int) ($task['lines'] ?? 200),
+            'created_at' => (int) ($task['created_at'] ?? 0),
+            'expires_at' => (int) ($task['expires_at'] ?? 0),
+        ];
     }
 }

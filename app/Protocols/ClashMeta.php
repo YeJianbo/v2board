@@ -2,101 +2,16 @@
 
 namespace App\Protocols;
 
+use App\Models\SubscribeTemplate;
+use App\Services\SubscriptionResponse;
 use App\Utils\Helper;
+use App\Support\RavelSubscription;
 use Symfony\Component\Yaml\Yaml;
 
 class ClashMeta
 {
     private const CLASH_META_FOR_ANDROID_ANYTLS_MIN_VERSION = '2.11.8';
     private const MIHOMO_ANYTLS_MIN_VERSION = '1.19.3';
-    private const HEALTHCHECK_URL = 'http://cp.cloudflare.com/generate_204';
-    private const GLOBAL_AUTO_NAME = '♻️ 自动选择';
-    private const REGION_UNKNOWN = 'OTHER';
-    private const REGION_META = [
-        'CN' => ['flag' => '🇨🇳', 'label' => '中国'],
-        'HK' => ['flag' => '🇭🇰', 'label' => '香港'],
-        'MO' => ['flag' => '🇲🇴', 'label' => '澳门'],
-        'TW' => ['flag' => '🇹🇼', 'label' => '台湾'],
-        'JP' => ['flag' => '🇯🇵', 'label' => '日本'],
-        'KR' => ['flag' => '🇰🇷', 'label' => '韩国'],
-        'SG' => ['flag' => '🇸🇬', 'label' => '新加坡'],
-        'MY' => ['flag' => '🇲🇾', 'label' => '马来西亚'],
-        'TH' => ['flag' => '🇹🇭', 'label' => '泰国'],
-        'PH' => ['flag' => '🇵🇭', 'label' => '菲律宾'],
-        'US' => ['flag' => '🇺🇸', 'label' => '美国'],
-        'CA' => ['flag' => '🇨🇦', 'label' => '加拿大'],
-        'GB' => ['flag' => '🇬🇧', 'label' => '英国'],
-        'DE' => ['flag' => '🇩🇪', 'label' => '德国'],
-        'FR' => ['flag' => '🇫🇷', 'label' => '法国'],
-        'NL' => ['flag' => '🇳🇱', 'label' => '荷兰'],
-        'AU' => ['flag' => '🇦🇺', 'label' => '澳大利亚'],
-        self::REGION_UNKNOWN => ['flag' => '🌐', 'label' => '其他地区'],
-    ];
-    private const REGION_TOKEN_MAP = [
-        '中国' => 'CN',
-        '大陆' => 'CN',
-        '内地' => 'CN',
-        '香港' => 'HK',
-        'hk' => 'HK',
-        'hong kong' => 'HK',
-        'hongkong' => 'HK',
-        '澳门' => 'MO',
-        'macao' => 'MO',
-        'macau' => 'MO',
-        '台湾' => 'TW',
-        'tw' => 'TW',
-        'taiwan' => 'TW',
-        '日本' => 'JP',
-        'jp' => 'JP',
-        'japan' => 'JP',
-        '韩国' => 'KR',
-        'kr' => 'KR',
-        'korea' => 'KR',
-        '新加坡' => 'SG',
-        'sg' => 'SG',
-        'singapore' => 'SG',
-        '马来西亚' => 'MY',
-        '大马' => 'MY',
-        'my' => 'MY',
-        'malaysia' => 'MY',
-        '泰国' => 'TH',
-        'th' => 'TH',
-        'thailand' => 'TH',
-        '菲律宾' => 'PH',
-        'ph' => 'PH',
-        'philippines' => 'PH',
-        '美国' => 'US',
-        '美國' => 'US',
-        'us' => 'US',
-        'usa' => 'US',
-        'america' => 'US',
-        'united states' => 'US',
-        '加拿大' => 'CA',
-        'ca' => 'CA',
-        'canada' => 'CA',
-        '英国' => 'GB',
-        '英國' => 'GB',
-        'uk' => 'GB',
-        'gb' => 'GB',
-        'britain' => 'GB',
-        'united kingdom' => 'GB',
-        '德国' => 'DE',
-        '德國' => 'DE',
-        'de' => 'DE',
-        'germany' => 'DE',
-        '法国' => 'FR',
-        '法國' => 'FR',
-        'fr' => 'FR',
-        'france' => 'FR',
-        '荷兰' => 'NL',
-        '荷蘭' => 'NL',
-        'nl' => 'NL',
-        'netherlands' => 'NL',
-        '澳大利亚' => 'AU',
-        '澳洲' => 'AU',
-        'au' => 'AU',
-        'australia' => 'AU',
-    ];
     public $flag = 'meta';
     private $servers;
     private $user;
@@ -113,24 +28,9 @@ class ClashMeta
         $user = $this->user;
         $appName = config('v2board.app_name', 'V2Board');
         $appUrl = config('v2board.app_url');
-        header("subscription-userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}");
-        header('profile-update-interval: 24');
-        header('profile-title: base64:' . base64_encode($appName));
-        if ($appUrl) {
-            header('profile-web-page-url: ' . $appUrl);
-            header('support-url: ' . $appUrl);
-        }
-        header("content-disposition:attachment;filename*=UTF-8''".rawurlencode($appName));
-        $defaultConfig = base_path() . '/resources/rules/default.clash.yaml';
-        $customConfig = base_path() . '/resources/rules/custom2.clash.yaml';
-        if (\File::exists($customConfig)) {
-            $config = Yaml::parseFile($customConfig);
-        } else {
-            $config = Yaml::parseFile($defaultConfig);
-        }
+        $config = SubscribeTemplate::parseYaml($this->templateName());
         $proxy = [];
         $proxies = [];
-        $regionProxyMap = [];
         $clientInfo = $this->getClientInfo();
 
         foreach ($servers as $item) {
@@ -183,51 +83,24 @@ class ClashMeta
                     $proxies[] = $item['name'];
                     $handled = true;
                     break;
-            }
-
-            if ($handled && !empty($item['name'])) {
-                $regionCode = $this->inferRegionCode($item);
-                if (!isset($regionProxyMap[$regionCode])) {
-                    $regionProxyMap[$regionCode] = [];
-                }
-                $regionProxyMap[$regionCode][] = $item['name'];
-            }
-        }
-
-        $config['proxy-groups'] = $this->injectDynamicRegionGroups(
-            $config['proxy-groups'] ?? [],
-            $regionProxyMap
-        );
-        $config['proxies'] = array_merge($config['proxies'] ? $config['proxies'] : [], $proxy);
-        foreach ($config['proxy-groups'] as $k => $v) {
-            if (!is_array($config['proxy-groups'][$k]['proxies'])) $config['proxy-groups'][$k]['proxies'] = [];
-            $isFilter = false;
-            foreach ($config['proxy-groups'][$k]['proxies'] as $src) {
-                foreach ($proxies as $dst) {
-                    if (!$this->isRegex($src)) continue;
-                    $isFilter = true;
-                    $config['proxy-groups'][$k]['proxies'] = array_values(array_diff($config['proxy-groups'][$k]['proxies'], [$src]));
-                    if ($this->isMatch($src, $dst)) {
-                        array_push($config['proxy-groups'][$k]['proxies'], $dst);
+                case 'ravel':
+                    $ravel = RavelSubscription::mihomo($item);
+                    if (!$ravel) {
+                        break;
                     }
-                }
-                if ($isFilter) continue;
+                    $proxy[] = $ravel;
+                    $proxies[] = $item['name'];
+                    $handled = true;
+                    break;
             }
-            if ($isFilter) continue;
-            if (!empty($config['proxy-groups'][$k]['__skip_auto_fill'])) continue;
-            $config['proxy-groups'][$k]['proxies'] = array_merge($config['proxy-groups'][$k]['proxies'], $proxies);
+
         }
-        $config['proxy-groups'] = array_filter($config['proxy-groups'], function($group) {
-            unset($group['__skip_auto_fill']);
-            return $group['proxies'];
-        });
-        foreach ($config['proxy-groups'] as &$group) {
-            unset($group['__skip_auto_fill']);
-            $group['proxies'] = array_values(array_unique($group['proxies']));
-        }
-        unset($group);
-        $config['proxy-groups'] = array_values($config['proxy-groups']);
-        $config = $this->externalizeRulesForProviders($config);
+
+        $config['proxies'] = array_merge($config['proxies'] ? $config['proxies'] : [], $proxy);
+        $config['proxy-groups'] = $this->resolveProxyGroups(
+            is_array($config['proxy-groups'] ?? null) ? $config['proxy-groups'] : [],
+            $proxies
+        );
         // Force the current subscription domain to be a direct rule
         //$subsDomain = $_SERVER['HTTP_HOST'];
         //if ($subsDomain) {
@@ -236,12 +109,17 @@ class ClashMeta
 
         $yaml = Yaml::dump($config, 2, 4, Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE);
         $yaml = str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
-        return response($yaml, 200, [
+        return response($yaml, 200, array_merge(SubscriptionResponse::headers($user, $appName, $appUrl), [
             'Content-Type' => 'text/yaml; charset=utf-8',
             'Content-Length' => strlen($yaml),
-            'Cache-Control' => 'no-store, no-transform',
+            'Cache-Control' => 'private, no-store, no-transform',
             'X-Accel-Buffering' => 'no',
-        ]);
+        ]));
+    }
+
+    protected function templateName(): string
+    {
+        return 'clashmeta';
     }
 
     private function getClientInfo(): array
@@ -301,236 +179,6 @@ class ClashMeta
             !empty($tlsSettings['public_key']) ||
             !empty($tlsSettings['short_id'])
         );
-    }
-
-    private function externalizeRulesForProviders(array $config): array
-    {
-        $providerMap = $this->getRuleProviderMap();
-        $providerBaseUrl = rtrim(config('v2board.app_url') ?: request()->getSchemeAndHttpHost(), '/')
-            . '/rules/clash/';
-        $providers = is_array($config['rule-providers'] ?? null) ? $config['rule-providers'] : [];
-        $rules = [];
-        $usedProviders = [];
-        $deferredMatchRules = [];
-
-        foreach (($config['rules'] ?? []) as $rule) {
-            if (!is_string($rule)) {
-                continue;
-            }
-            $rule = trim($rule);
-            if ($rule === '' || strpos($rule, '#') === 0) {
-                continue;
-            }
-
-            $parts = array_map('trim', explode(',', $rule));
-            $type = strtoupper($parts[0] ?? '');
-            if ($type === 'MATCH') {
-                $deferredMatchRules[] = $rule;
-                continue;
-            }
-            if ($type === 'RULE-SET') {
-                $rules[] = $rule;
-                continue;
-            }
-
-            $targetIndex = count($parts) - 1;
-            if ($targetIndex > 1 && strtolower($parts[$targetIndex]) === 'no-resolve') {
-                $targetIndex--;
-            }
-            $target = $parts[$targetIndex] ?? null;
-            if ($target === '🌐 IPv6') {
-                $rules[] = $rule;
-                continue;
-            }
-            if (!$target || !isset($providerMap[$target])) {
-                $rules[] = $rule;
-                continue;
-            }
-
-            $provider = $providerMap[$target];
-            $providerName = $provider['name'];
-            if (empty($usedProviders[$providerName])) {
-                $rules[] = "RULE-SET,{$providerName},{$target}";
-                $usedProviders[$providerName] = true;
-            }
-            if (!isset($providers[$providerName])) {
-                $providers[$providerName] = [
-                    'type' => 'http',
-                    'behavior' => 'classical',
-                    'url' => $providerBaseUrl . $provider['file'],
-                    'path' => './BunCloud/' . $provider['file'],
-                    'interval' => 86400,
-                ];
-            }
-        }
-
-        if (!empty($usedProviders['BunCloudDirect'])) {
-            $rules[] = 'GEOIP,CN,🎯 全球直连,no-resolve';
-        }
-
-        $config['rule-providers'] = $providers;
-        $config['rules'] = array_values(array_unique(array_merge(
-            $this->getSubscriptionBunCloudRules(),
-            $rules,
-            $deferredMatchRules
-        )));
-        return $config;
-    }
-
-    private function getSubscriptionBunCloudRules(): array
-    {
-        return [
-            'DOMAIN-SUFFIX,151376.xyz,🐻 BunCloud',
-            'DOMAIN-SUFFIX,buncloud.eu.org,🐻 BunCloud',
-        ];
-    }
-
-    private function getRuleProviderMap(): array
-    {
-        return [
-            '🚀 节点选择' => ['name' => 'BunCloudProxy', 'file' => 'proxy.yaml'],
-            '🌍 国外媒体' => ['name' => 'BunCloudMedia', 'file' => 'media.yaml'],
-            '💡 OpenAI' => ['name' => 'BunCloudOpenAI', 'file' => 'openai.yaml'],
-            '▶️ YouTube' => ['name' => 'BunCloudYouTube', 'file' => 'youtube.yaml'],
-            '🔍 Google' => ['name' => 'BunCloudGoogle', 'file' => 'google.yaml'],
-            '📸 Facebook' => ['name' => 'BunCloudFacebook', 'file' => 'facebook.yaml'],
-            '𝕏 Twitter' => ['name' => 'BunCloudTwitter', 'file' => 'twitter.yaml'],
-            'ᯤ Spotify' => ['name' => 'BunCloudSpotify', 'file' => 'spotify.yaml'],
-            '📢 谷歌FCM' => ['name' => 'BunCloudGoogleFCM', 'file' => 'google-fcm.yaml'],
-            '📲 电报信息' => ['name' => 'BunCloudTelegram', 'file' => 'telegram.yaml'],
-            'Ⓜ️ 微软服务' => ['name' => 'BunCloudMicrosoft', 'file' => 'microsoft.yaml'],
-            '🍎 苹果服务' => ['name' => 'BunCloudApple', 'file' => 'apple.yaml'],
-            '🅱 哔哩哔哩' => ['name' => 'BunCloudBilibili', 'file' => 'bilibili.yaml'],
-            '💬 微信消息' => ['name' => 'BunCloudWeChat', 'file' => 'wechat.yaml'],
-            '🧑‍💻 GitHub' => ['name' => 'BunCloudGitHub', 'file' => 'github.yaml'],
-            '🧰 开发环境' => ['name' => 'BunCloudDev', 'file' => 'dev.yaml'],
-            '🐻 BunCloud' => ['name' => 'BunCloudSite', 'file' => 'buncloud.yaml'],
-            '🎯 全球直连' => ['name' => 'BunCloudDirect', 'file' => 'direct.yaml'],
-            '🌐 IPv6' => ['name' => 'BunCloudIPv6', 'file' => 'ipv6.yaml'],
-            'REJECT' => ['name' => 'BunCloudReject', 'file' => 'reject.yaml'],
-            'DIRECT' => ['name' => 'BunCloudProcessDirect', 'file' => 'process-direct.yaml'],
-        ];
-    }
-
-    private function compactRulesForMobileMeta(array $config): array
-    {
-        $groups = [];
-        foreach (($config['proxy-groups'] ?? []) as $group) {
-            if (!empty($group['name'])) {
-                $groups[(string)$group['name']] = true;
-            }
-        }
-
-        $target = function (string $name, string $fallback = '🚀 节点选择') use ($groups): string {
-            if (isset($groups[$name])) {
-                return $name;
-            }
-            if (isset($groups[$fallback])) {
-                return $fallback;
-            }
-            return 'DIRECT';
-        };
-
-        $config['rules'] = [
-            'DOMAIN-SUFFIX,151376.xyz,' . $target('🐻 BunCloud'),
-            'DOMAIN-SUFFIX,buncloud.eu.org,' . $target('🐻 BunCloud'),
-
-            'DOMAIN-SUFFIX,openai.com,' . $target('💡 OpenAI'),
-            'DOMAIN-SUFFIX,chatgpt.com,' . $target('💡 OpenAI'),
-            'DOMAIN-SUFFIX,oaistatic.com,' . $target('💡 OpenAI'),
-            'DOMAIN-SUFFIX,oaiusercontent.com,' . $target('💡 OpenAI'),
-            'DOMAIN-SUFFIX,anthropic.com,' . $target('💡 OpenAI'),
-
-            'DOMAIN-KEYWORD,youtube,' . $target('▶️ YouTube'),
-            'DOMAIN-SUFFIX,youtu.be,' . $target('▶️ YouTube'),
-            'DOMAIN-SUFFIX,googlevideo.com,' . $target('▶️ YouTube'),
-            'DOMAIN-SUFFIX,ytimg.com,' . $target('▶️ YouTube'),
-            'DOMAIN-SUFFIX,gvt2.com,' . $target('▶️ YouTube'),
-
-            'DOMAIN-SUFFIX,google.com,' . $target('🔍 Google'),
-            'DOMAIN-SUFFIX,googleapis.com,' . $target('🔍 Google'),
-            'DOMAIN-SUFFIX,gstatic.com,' . $target('🔍 Google'),
-            'DOMAIN-SUFFIX,ggpht.com,' . $target('🔍 Google'),
-            'DOMAIN-SUFFIX,gmail.com,' . $target('🔍 Google'),
-            'DOMAIN-SUFFIX,googleusercontent.com,' . $target('🔍 Google'),
-            'DOMAIN-SUFFIX,xn--ngstr-lra8j.com,' . $target('🔍 Google'),
-            'DOMAIN-SUFFIX,services.googleapis.cn,' . $target('🔍 Google'),
-
-            'DOMAIN-SUFFIX,facebook.com,' . $target('📸 Facebook'),
-            'DOMAIN-SUFFIX,fbcdn.net,' . $target('📸 Facebook'),
-            'DOMAIN-SUFFIX,instagram.com,' . $target('📸 Facebook'),
-            'DOMAIN-SUFFIX,whatsapp.com,' . $target('📸 Facebook'),
-
-            'DOMAIN-SUFFIX,x.com,' . $target('𝕏 Twitter'),
-            'DOMAIN-SUFFIX,twitter.com,' . $target('𝕏 Twitter'),
-            'DOMAIN-SUFFIX,twimg.com,' . $target('𝕏 Twitter'),
-
-            'DOMAIN-SUFFIX,spotify.com,' . $target('ᯤ Spotify'),
-            'DOMAIN-SUFFIX,scdn.co,' . $target('ᯤ Spotify'),
-
-            'DOMAIN-SUFFIX,telegram.org,' . $target('📲 电报信息'),
-            'DOMAIN-SUFFIX,t.me,' . $target('📲 电报信息'),
-            'IP-CIDR,91.108.4.0/22,' . $target('📲 电报信息') . ',no-resolve',
-            'IP-CIDR,91.108.8.0/21,' . $target('📲 电报信息') . ',no-resolve',
-            'IP-CIDR,149.154.160.0/20,' . $target('📲 电报信息') . ',no-resolve',
-
-            'DOMAIN-SUFFIX,github.com,' . $target('🧑‍💻 GitHub'),
-            'DOMAIN-SUFFIX,githubusercontent.com,' . $target('🧑‍💻 GitHub'),
-            'DOMAIN-SUFFIX,githubassets.com,' . $target('🧑‍💻 GitHub'),
-
-            'DOMAIN-SUFFIX,python.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,pypi.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,pythonhosted.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,anaconda.com,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,anaconda.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,repo.anaconda.com,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,conda-forge.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,nodejs.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,npmjs.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,docker.com,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,docker.io,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,quay.io,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,golang.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,go.dev,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,rust-lang.org,' . $target('🧰 开发环境'),
-            'DOMAIN-SUFFIX,crates.io,' . $target('🧰 开发环境'),
-
-            'DOMAIN-SUFFIX,microsoft.com,' . $target('Ⓜ️ 微软服务'),
-            'DOMAIN-SUFFIX,windows.com,' . $target('Ⓜ️ 微软服务'),
-            'DOMAIN-SUFFIX,office.com,' . $target('Ⓜ️ 微软服务'),
-            'DOMAIN-SUFFIX,live.com,' . $target('Ⓜ️ 微软服务'),
-            'DOMAIN-SUFFIX,onedrive.com,' . $target('Ⓜ️ 微软服务'),
-
-            'DOMAIN-SUFFIX,apple.com,' . $target('🍎 苹果服务'),
-            'DOMAIN-SUFFIX,icloud.com,' . $target('🍎 苹果服务'),
-            'DOMAIN-SUFFIX,appstore.com,' . $target('🍎 苹果服务'),
-
-            'DOMAIN-SUFFIX,app-measurement.com,' . $target('📢 谷歌FCM'),
-            'DOMAIN,mtalk.google.com,' . $target('📢 谷歌FCM'),
-
-            'DOMAIN-SUFFIX,bilibili.com,' . $target('🅱 哔哩哔哩', '🎯 全球直连'),
-            'DOMAIN-SUFFIX,bilivideo.com,' . $target('🅱 哔哩哔哩', '🎯 全球直连'),
-            'DOMAIN-SUFFIX,acgvideo.com,' . $target('🅱 哔哩哔哩', '🎯 全球直连'),
-
-            'DOMAIN-KEYWORD,weixin,' . $target('💬 微信消息', '🎯 全球直连'),
-            'DOMAIN-KEYWORD,wechat,' . $target('💬 微信消息', '🎯 全球直连'),
-            'DOMAIN-SUFFIX,qq.com,' . $target('💬 微信消息', '🎯 全球直连'),
-
-            'DOMAIN-SUFFIX,cn,' . $target('🎯 全球直连'),
-            'DOMAIN-SUFFIX,中国,' . $target('🎯 全球直连'),
-            'DOMAIN-SUFFIX,local,' . $target('🎯 全球直连'),
-            'IP-CIDR,10.0.0.0/8,' . $target('🎯 全球直连') . ',no-resolve',
-            'IP-CIDR,172.16.0.0/12,' . $target('🎯 全球直连') . ',no-resolve',
-            'IP-CIDR,192.168.0.0/16,' . $target('🎯 全球直连') . ',no-resolve',
-            'IP-CIDR,127.0.0.0/8,' . $target('🎯 全球直连') . ',no-resolve',
-            'IP-CIDR6,fc00::/7,' . $target('🎯 全球直连') . ',no-resolve',
-            'IP-CIDR6,fe80::/10,' . $target('🎯 全球直连') . ',no-resolve',
-            'GEOIP,CN,' . $target('🎯 全球直连'),
-            'MATCH,' . $target('🐟 漏网之鱼'),
-        ];
-
-        unset($config['rule-providers']);
-        return $config;
     }
 
     public static function buildShadowsocks($password, $server)
@@ -929,6 +577,45 @@ class ClashMeta
         return $array;
     }
 
+    protected function resolveProxyGroups(array $groups, array $proxies): array
+    {
+        $resolvedGroups = [];
+        foreach ($groups as $group) {
+            if (!is_array($group)) {
+                continue;
+            }
+
+            $sources = is_array($group['proxies'] ?? null) ? $group['proxies'] : [];
+            $resolvedProxies = [];
+            $hasRegexFilter = false;
+            foreach ($sources as $source) {
+                if (!$this->isRegex($source)) {
+                    $resolvedProxies[] = $source;
+                    continue;
+                }
+
+                $hasRegexFilter = true;
+                foreach ($proxies as $proxyName) {
+                    if ($this->isMatch($source, $proxyName)) {
+                        $resolvedProxies[] = $proxyName;
+                    }
+                }
+            }
+
+            if (!$hasRegexFilter && empty($group['__skip_auto_fill'])) {
+                $resolvedProxies = array_merge($resolvedProxies, $proxies);
+            }
+
+            unset($group['__skip_auto_fill']);
+            $group['proxies'] = array_values(array_unique($resolvedProxies));
+            if ($group['proxies']) {
+                $resolvedGroups[] = $group;
+            }
+        }
+
+        return $resolvedGroups;
+    }
+
     private function isMatch($exp, $str)
     {
         return @preg_match($exp, $str);
@@ -939,163 +626,4 @@ class ClashMeta
         return @preg_match($exp, '') !== false;
     }
 
-    private function injectDynamicRegionGroups(array $groups, array $regionProxyMap): array
-    {
-        $builtGroups = $this->buildRegionGroups($regionProxyMap);
-        if (empty($builtGroups['groups'])) {
-            return $groups;
-        }
-        return array_merge($groups, $builtGroups['groups']);
-    }
-
-    private function buildRegionGroups(array $regionProxyMap): array
-    {
-        if (empty($regionProxyMap)) {
-            return ['groups' => [], 'selectorNames' => []];
-        }
-
-        $groups = [];
-        foreach ($this->sortRegionProxyMap($regionProxyMap) as $regionCode => $proxyNames) {
-            $proxyNames = array_values(array_unique(array_filter($proxyNames)));
-            if (empty($proxyNames)) {
-                continue;
-            }
-
-            $regionMeta = self::REGION_META[$regionCode] ?? self::REGION_META[self::REGION_UNKNOWN];
-            $regionLabel = $regionMeta['label'];
-            $regionSelectorName = '📍 地区-' . $regionMeta['flag'] . ' ' . $regionLabel;
-            $autoGroupName = '♻️ 地区自动-' . $regionLabel;
-            $fallbackGroupName = '🔯 地区故障转移-' . $regionLabel;
-
-            $groups[] = [
-                'name' => $autoGroupName,
-                'type' => 'url-test',
-                'proxies' => $proxyNames,
-                'url' => self::HEALTHCHECK_URL,
-                'interval' => 300,
-                '__skip_auto_fill' => true,
-            ];
-            $groups[] = [
-                'name' => $fallbackGroupName,
-                'type' => 'fallback',
-                'proxies' => $proxyNames,
-                'url' => self::HEALTHCHECK_URL,
-                'interval' => 300,
-                '__skip_auto_fill' => true,
-            ];
-            $groups[] = [
-                'name' => $regionSelectorName,
-                'type' => 'select',
-                'proxies' => array_merge([$autoGroupName, $fallbackGroupName], $proxyNames),
-                '__skip_auto_fill' => true,
-            ];
-        }
-
-        return ['groups' => $groups, 'selectorNames' => []];
-    }
-
-    private function sortRegionProxyMap(array $regionProxyMap): array
-    {
-        $orderedCodes = array_keys(self::REGION_META);
-        $sorted = [];
-
-        foreach ($orderedCodes as $regionCode) {
-            if (isset($regionProxyMap[$regionCode])) {
-                $sorted[$regionCode] = $regionProxyMap[$regionCode];
-            }
-        }
-
-        foreach ($regionProxyMap as $regionCode => $proxyNames) {
-            if (!isset($sorted[$regionCode])) {
-                $sorted[$regionCode] = $proxyNames;
-            }
-        }
-
-        return $sorted;
-    }
-
-    private function inferRegionCode(array $server): string
-    {
-        $sources = [
-            $server['country_code'] ?? null,
-            $server['countryCode'] ?? null,
-            $server['country'] ?? null,
-            $server['country_name'] ?? null,
-            $server['region'] ?? null,
-            $server['area'] ?? null,
-            $server['location'] ?? null,
-            $server['name'] ?? null,
-            $server['host'] ?? null,
-        ];
-
-        foreach ($sources as $source) {
-            $regionCode = $this->inferRegionCodeFromSource($source);
-            if ($regionCode !== null) {
-                return $regionCode;
-            }
-        }
-
-        return self::REGION_UNKNOWN;
-    }
-
-    private function inferRegionCodeFromSource($source): ?string
-    {
-        $value = trim((string) $source);
-        if ($value === '') {
-            return null;
-        }
-
-        $upperValue = strtoupper($value);
-        if (isset(self::REGION_META[$upperValue])) {
-            return $upperValue;
-        }
-        if ($upperValue === 'UK') {
-            return 'GB';
-        }
-
-        $flagMap = [
-            '🇨🇳' => 'CN',
-            '🇭🇰' => 'HK',
-            '🇲🇴' => 'MO',
-            '🇹🇼' => 'TW',
-            '🇯🇵' => 'JP',
-            '🇰🇷' => 'KR',
-            '🇸🇬' => 'SG',
-            '🇲🇾' => 'MY',
-            '🇹🇭' => 'TH',
-            '🇵🇭' => 'PH',
-            '🇺🇸' => 'US',
-            '🇨🇦' => 'CA',
-            '🇬🇧' => 'GB',
-            '🇩🇪' => 'DE',
-            '🇫🇷' => 'FR',
-            '🇳🇱' => 'NL',
-            '🇦🇺' => 'AU',
-        ];
-
-        foreach ($flagMap as $flag => $regionCode) {
-            if (mb_strpos($value, $flag) !== false) {
-                return $regionCode;
-            }
-        }
-
-        $normalizedValue = mb_strtolower($value);
-        foreach (self::REGION_TOKEN_MAP as $token => $regionCode) {
-            if (mb_strpos($normalizedValue, mb_strtolower($token)) !== false) {
-                return $regionCode;
-            }
-        }
-
-        if (preg_match('/\b([A-Za-z]{2})\b/u', $value, $matches)) {
-            $token = strtoupper($matches[1]);
-            if ($token === 'UK') {
-                return 'GB';
-            }
-            if (isset(self::REGION_META[$token])) {
-                return $token;
-            }
-        }
-
-        return null;
-    }
 }

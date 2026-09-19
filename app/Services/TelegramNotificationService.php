@@ -10,9 +10,11 @@ use Illuminate\Support\Facades\Cache;
 class TelegramNotificationService
 {
     private const MACHINE_STATE_PREFIX = 'telegram:machine:monitor:v1:';
+    private const MACHINE_QUALITY_STATE_PREFIX = 'telegram:machine:quality:v1:';
     private const USER_TRAFFIC_STATE_PREFIX = 'telegram:user:traffic:v1:';
 
     private TelegramService $telegramService;
+    private $cacheRepository = null;
 
     public function __construct(?TelegramService $telegramService = null)
     {
@@ -27,6 +29,7 @@ class TelegramNotificationService
             'offline' => 0,
             'alerts' => 0,
             'recoveries' => 0,
+            'renewals' => 0,
         ];
 
         if (!$this->telegramEnabled() || !(bool) $this->setting('telegram_machine_alert_enable', 1)) {
@@ -37,9 +40,29 @@ class TelegramNotificationService
         $offlineAfter = $this->clamp((int) $this->setting('telegram_machine_offline_seconds', 300), 180, 86400);
         $statusAlertEnabled = (bool) $this->setting('telegram_machine_status_alert_enable', 1);
         $machines = Machine::query()
-            ->get(['id', 'name', 'host', 'status', 'updated_at']);
+            ->get([
+                'id',
+                'name',
+                'host',
+                'status',
+                'maintenance_until',
+                'maintenance_note',
+                'idc_name',
+                'billing_amount',
+                'billing_currency',
+                'billing_cycle',
+                'renew_at',
+                'renew_alert_enabled',
+                'renew_alert_days',
+                'updated_at',
+            ]);
 
         foreach ($machines as $machine) {
+            if ($this->checkMachineRenewal($machine, $now, $dryRun)) {
+                $summary['alerts']++;
+                $summary['renewals']++;
+            }
+
             $status = $this->machineStatus($machine);
             $reportedAt = (int) ($status['reported_at'] ?? 0);
             if ($reportedAt <= 0) {
@@ -52,9 +75,36 @@ class TelegramNotificationService
 
             $stateKey = self::MACHINE_STATE_PREFIX . $machine->id;
             $state = $this->cache()->get($stateKey);
+            if ($machine->isInMaintenance($now)) {
+                $state = $this->initialMachineState($online, $now);
+                $state['maintenance_active'] = true;
+                $state['offline_since'] = $online ? 0 : $reportedAt + $offlineAfter;
+                if (!$dryRun) {
+                    $this->cache()->forever($stateKey, $state);
+                }
+                continue;
+            }
+
             if (!is_array($state) || !array_key_exists('online', $state)) {
                 if (!$dryRun) {
                     $this->cache()->forever($stateKey, $this->initialMachineState($online, $now));
+                }
+                continue;
+            }
+
+            if ((bool) ($state['maintenance_active'] ?? false)) {
+                $state = $this->initialMachineState($online, $now);
+                if (!$online) {
+                    $notified = false;
+                    if ($statusAlertEnabled && $this->sendMachineOffline($machine, $status, $reportedAt, $offlineAfter, $dryRun)) {
+                        $summary['alerts']++;
+                        $notified = true;
+                    }
+                    $state['offline_since'] = $reportedAt + $offlineAfter;
+                    $state['offline_notified'] = $notified;
+                }
+                if (!$dryRun) {
+                    $this->cache()->forever($stateKey, $state);
                 }
                 continue;
             }
@@ -149,6 +199,187 @@ class TelegramNotificationService
         SendTelegramJob::dispatch((int) $user->telegram_id, $message, '');
         $this->cache()->forever($stateKey, $level);
         return true;
+    }
+
+    public function recordMachineTraffic(
+        Machine $machine,
+        int $netInBytes,
+        int $netOutBytes,
+        ?int $recordedAt = null
+    ): bool {
+        $netInBytes = max(0, $netInBytes);
+        $netOutBytes = max(0, $netOutBytes);
+        if (($netInBytes + $netOutBytes) <= 0) {
+            return false;
+        }
+
+        $now = $recordedAt ?: time();
+        $stateKey = $machine->trafficAlertStateCacheKey();
+        $state = $this->getMachineTrafficState($machine, $now);
+
+        $state['net_in'] = max(0, (int) ($state['net_in'] ?? 0)) + $netInBytes;
+        $state['net_out'] = max(0, (int) ($state['net_out'] ?? 0)) + $netOutBytes;
+        $state['updated_at'] = $now;
+        $total = $state['net_in'] + $state['net_out'];
+        $state['total'] = $total;
+        $threshold = max(0, (int) $machine->traffic_alert_bytes);
+        $alertEnabled = (bool) $machine->traffic_alert_enabled && $threshold > 0;
+        $alertSignature = ($alertEnabled ? '1' : '0') . ':' . $threshold;
+        if ((string) ($state['alert_signature'] ?? '') !== $alertSignature) {
+            $state['alert_signature'] = $alertSignature;
+            $state['alerted'] = false;
+            unset($state['alerted_at']);
+        }
+        $sent = false;
+
+        if (
+            $alertEnabled
+            &&
+            $total >= $threshold
+            && !(bool) ($state['alerted'] ?? false)
+            && !$machine->isInMaintenance($now)
+            && $this->telegramEnabled()
+            && (bool) $this->setting('telegram_machine_alert_enable', 1)
+        ) {
+            $sent = $this->sendMachineTrafficMessage($machine, $state, $threshold);
+            if ($sent) {
+                $state['alerted'] = true;
+                $state['alerted_at'] = $now;
+            }
+        }
+
+        $ttl = max(3600, ((int) $state['ends_at'] - $now) + 86400);
+        $this->cache()->put($stateKey, $state, $ttl);
+
+        return $sent;
+    }
+
+    public function getMachineTrafficState(Machine $machine, ?int $at = null): array
+    {
+        $now = $at ?: time();
+        $cached = $this->cache()->get($machine->trafficAlertStateCacheKey());
+        $cached = is_array($cached) ? $cached : [];
+        $period = $machine->resolveTrafficPeriod($now, $cached);
+        $samePeriod = (string) ($cached['cycle_signature'] ?? '') === (string) $period['signature']
+            && (int) ($cached['started_at'] ?? 0) === (int) $period['started_at']
+            && (int) ($cached['ends_at'] ?? 0) === (int) $period['ends_at'];
+
+        $state = $samePeriod ? $cached : [
+            'cycle_signature' => (string) $period['signature'],
+            'mode' => (string) $period['mode'],
+            'started_at' => (int) $period['started_at'],
+            'ends_at' => (int) $period['ends_at'],
+            'net_in' => 0,
+            'net_out' => 0,
+            'alerted' => false,
+        ];
+        $netIn = max(0, (int) ($state['net_in'] ?? 0));
+        $netOut = max(0, (int) ($state['net_out'] ?? 0));
+        $threshold = max(0, (int) $machine->traffic_alert_bytes);
+        $total = $netIn + $netOut;
+
+        return array_merge($state, [
+            'mode' => (string) $period['mode'],
+            'net_in' => $netIn,
+            'net_out' => $netOut,
+            'total' => $total,
+            'limit_bytes' => $threshold,
+            'remaining_bytes' => $threshold > 0 ? max(0, $threshold - $total) : 0,
+            'percentage' => $threshold > 0 ? round(($total / $threshold) * 100, 2) : 0,
+        ]);
+    }
+
+    public function handleNetworkQualitySamples(Machine $machine, array $samples): array
+    {
+        $summary = ['alerts' => 0, 'recoveries' => 0];
+        if (
+            !$this->telegramEnabled()
+            || !(bool) $this->setting('telegram_machine_alert_enable', 1)
+            || !(bool) $this->setting('telegram_machine_quality_alert_enable', 0)
+        ) {
+            return $summary;
+        }
+
+        if ($machine->isInMaintenance()) {
+            foreach ($samples as $sample) {
+                $targetKey = trim((string) ($sample['target_key'] ?? ''));
+                if ($targetKey !== '') {
+                    $this->cache()->forget(self::MACHINE_QUALITY_STATE_PREFIX . $machine->id . ':' . $targetKey);
+                }
+            }
+            return $summary;
+        }
+
+        $latencyThreshold = max(1, min(60000, (float) $this->setting('telegram_machine_quality_latency_threshold', 300)));
+        $lossThreshold = max(1, min(100, (float) $this->setting('telegram_machine_quality_loss_threshold', 30)));
+        $consecutiveRequired = $this->clamp((int) $this->setting('telegram_machine_quality_consecutive_count', 3), 1, 30);
+        $cooldown = $this->clamp((int) $this->setting('telegram_machine_quality_cooldown_seconds', 1800), 60, 86400);
+        $now = time();
+
+        foreach ($samples as $sample) {
+            $targetKey = (string) ($sample['target_key'] ?? '');
+            if ($targetKey === '') {
+                continue;
+            }
+
+            $signature = implode(':', [
+                (string) ($sample['probe_type'] ?? 'icmp'),
+                (int) ($sample['target_port'] ?? 80),
+                (string) ($sample['ip_version'] ?? 'auto'),
+                (string) ($sample['target_host'] ?? ''),
+            ]);
+            $stateKey = self::MACHINE_QUALITY_STATE_PREFIX . $machine->id . ':' . $targetKey;
+            $state = $this->cache()->get($stateKey);
+            if (!is_array($state) || ($state['signature'] ?? '') !== $signature) {
+                $state = [
+                    'signature' => $signature,
+                    'consecutive' => 0,
+                    'alerted' => false,
+                    'last_alert_at' => 0,
+                ];
+            }
+
+            $latency = isset($sample['latency_avg']) && is_numeric($sample['latency_avg'])
+                ? (float) $sample['latency_avg']
+                : null;
+            $loss = max(0, min(100, (float) ($sample['packet_loss'] ?? 100)));
+            $abnormal = $loss >= $lossThreshold || ($latency !== null && $latency >= $latencyThreshold);
+
+            if ($abnormal) {
+                $state['consecutive'] = (int) ($state['consecutive'] ?? 0) + 1;
+                if (
+                    !(bool) ($state['alerted'] ?? false)
+                    && $state['consecutive'] >= $consecutiveRequired
+                    && ($now - (int) ($state['last_alert_at'] ?? 0)) >= $cooldown
+                    && $this->sendNetworkQualityMessage(
+                        $machine,
+                        $sample,
+                        false,
+                        $latencyThreshold,
+                        $lossThreshold,
+                        $state['consecutive']
+                    )
+                ) {
+                    $state['alerted'] = true;
+                    $state['last_alert_at'] = $now;
+                    $summary['alerts']++;
+                }
+            } else {
+                $state['consecutive'] = 0;
+                if (
+                    (bool) ($state['alerted'] ?? false)
+                    && $this->sendNetworkQualityMessage($machine, $sample, true, $latencyThreshold, $lossThreshold, 0)
+                ) {
+                    $state['alerted'] = false;
+                    $summary['recoveries']++;
+                }
+            }
+
+            $state['last_sample_at'] = $now;
+            $this->cache()->forever($stateKey, $state);
+        }
+
+        return $summary;
     }
 
     private function checkMachineResources(Machine $machine, array $status, array $state, int $now, bool $dryRun): array
@@ -262,6 +493,79 @@ class TelegramNotificationService
         return [$state, $alertCount, $recoveryCount];
     }
 
+    private function checkMachineRenewal(Machine $machine, int $now, bool $dryRun): bool
+    {
+        $stateKey = $machine->renewalAlertStateCacheKey();
+        $renewAt = max(0, (int) $machine->renew_at);
+        if (!(bool) $machine->renew_alert_enabled || $renewAt <= 0 || $machine->isInMaintenance($now)) {
+            if (!$dryRun) {
+                $this->cache()->forget($stateKey);
+            }
+            return false;
+        }
+
+        $alertDays = max(0, min(365, (int) ($machine->renew_alert_days ?? 7)));
+        $timezone = new \DateTimeZone(date_default_timezone_get());
+        $today = (new \DateTimeImmutable('@' . $now))->setTimezone($timezone)->setTime(0, 0);
+        $renewDate = (new \DateTimeImmutable('@' . $renewAt))->setTimezone($timezone)->setTime(0, 0);
+        $remainingDays = (int) $today->diff($renewDate)->format('%r%a');
+        if ($remainingDays > $alertDays) {
+            if (!$dryRun) {
+                $this->cache()->forget($stateKey);
+            }
+            return false;
+        }
+
+        $signature = $renewAt . ':' . $alertDays;
+        if ((string) $this->cache()->get($stateKey, '') === $signature) {
+            return false;
+        }
+
+        if (!$this->sendMachineRenewalMessage($machine, $remainingDays, $dryRun)) {
+            return false;
+        }
+
+        if (!$dryRun) {
+            $this->cache()->forever($stateKey, $signature);
+        }
+        return true;
+    }
+
+    private function sendMachineRenewalMessage(Machine $machine, int $remainingDays, bool $dryRun): bool
+    {
+        if ($dryRun) {
+            return true;
+        }
+
+        $deadline = $remainingDays < 0
+            ? '已逾期 ' . abs($remainingDays) . ' 天'
+            : ($remainingDays === 0 ? '今天到期' : $remainingDays . ' 天后到期');
+        $amount = (float) $machine->billing_amount;
+        $currency = strtoupper(trim((string) ($machine->billing_currency ?: 'USD')));
+        $cycleLabels = [
+            'monthly' => '月付',
+            'quarterly' => '季付',
+            'semiannual' => '半年付',
+            'yearly' => '年付',
+            'custom' => '自定义',
+        ];
+        $cycle = $cycleLabels[(string) $machine->billing_cycle] ?? '自定义';
+        $lines = [
+            ($remainingDays < 0 ? '🔴 ' : '🟠 ') . '主机续费提醒',
+            '名称：' . $machine->name,
+        ];
+        if (trim((string) $machine->idc_name) !== '') {
+            $lines[] = 'IDC：' . trim((string) $machine->idc_name);
+        }
+        if ($amount > 0) {
+            $lines[] = '费用：' . rtrim(rtrim(number_format($amount, 2, '.', ''), '0'), '.') . ' ' . $currency . ' / ' . $cycle;
+        }
+        $lines[] = '续费日期：' . date('Y-m-d', (int) $machine->renew_at);
+        $lines[] = '状态：' . $deadline;
+
+        return $this->telegramService->sendMessageWithAdmin(implode("\n", $lines), false, '') > 0;
+    }
+
     private function sendMachineOffline(Machine $machine, array $status, int $reportedAt, int $offlineAfter, bool $dryRun): bool
     {
         if ($dryRun) {
@@ -324,6 +628,67 @@ class TelegramNotificationService
             if (is_array($firstMetric) && !empty($firstMetric['duration'])) {
                 $lines[] = '持续时间：' . $this->formatDuration((int) $firstMetric['duration']);
             }
+        }
+
+        return $this->telegramService->sendMessageWithAdmin(implode("\n", $lines), false, '') > 0;
+    }
+
+    private function sendMachineTrafficMessage(Machine $machine, array $state, int $threshold): bool
+    {
+        $netIn = max(0, (int) ($state['net_in'] ?? 0));
+        $netOut = max(0, (int) ($state['net_out'] ?? 0));
+        $startedAt = (int) ($state['started_at'] ?? time());
+        $endsAt = (int) ($state['ends_at'] ?? $startedAt);
+        $modeLabels = [
+            'rolling' => '滚动周期',
+            'daily' => '每日重置',
+            'monthly' => '每月重置',
+        ];
+        $message = implode("\n", [
+            '🟠 主机计费流量告警',
+            '名称：' . $machine->name,
+            '重置方式：' . ($modeLabels[(string) ($state['mode'] ?? '')] ?? '滚动周期'),
+            '统计周期：' . date('Y-m-d H:i:s', $startedAt) . ' - ' . date('Y-m-d H:i:s', $endsAt),
+            '接收流量：' . $this->formatBytes($netIn),
+            '发送流量：' . $this->formatBytes($netOut),
+            '计费流量：' . $this->formatBytes($netIn + $netOut),
+            '告警阈值：' . $this->formatBytes($threshold),
+        ]);
+
+        return $this->telegramService->sendMessageWithAdmin($message, false, '') > 0;
+    }
+
+    private function sendNetworkQualityMessage(
+        Machine $machine,
+        array $sample,
+        bool $recovered,
+        float $latencyThreshold,
+        float $lossThreshold,
+        int $consecutive
+    ): bool {
+        $latency = isset($sample['latency_avg']) && is_numeric($sample['latency_avg'])
+            ? number_format((float) $sample['latency_avg'], 2) . ' ms'
+            : '无响应';
+        $loss = number_format((float) ($sample['packet_loss'] ?? 100), 2) . '%';
+        $probeType = strtolower((string) ($sample['probe_type'] ?? 'icmp'));
+        $ipVersion = (string) ($sample['ip_version'] ?? 'auto');
+        $probe = strtoupper($probeType);
+        if ($probeType === 'tcp') {
+            $probe .= ':' . (int) ($sample['target_port'] ?? 80);
+        }
+        $probe .= ' / ' . ($ipVersion === '4' ? 'IPv4' : ($ipVersion === '6' ? 'IPv6' : '自动'));
+
+        $lines = [
+            $recovered ? '🟢 网络质量恢复' : '🟠 网络质量告警',
+            '主机：' . $machine->name,
+            '目标：' . (string) ($sample['target_name'] ?? $sample['target_key'] ?? '-'),
+            '探测：' . $probe,
+            '延迟：' . $latency . '（阈值 ' . number_format($latencyThreshold, 0) . ' ms）',
+            '丢包：' . $loss . '（阈值 ' . number_format($lossThreshold, 0) . '%）',
+            '时间：' . date('Y-m-d H:i:s'),
+        ];
+        if (!$recovered) {
+            $lines[] = '连续异常：' . $consecutive . ' 次';
         }
 
         return $this->telegramService->sendMessageWithAdmin(implode("\n", $lines), false, '') > 0;
@@ -392,11 +757,19 @@ class TelegramNotificationService
 
     private function cache()
     {
-        try {
-            return Cache::store('redis');
-        } catch (\Throwable $e) {
-            return Cache::store(config('cache.default', 'file'));
+        if ($this->cacheRepository !== null) {
+            return $this->cacheRepository;
         }
+
+        try {
+            $cache = Cache::store('redis');
+            $cache->get('telegram:cache:connection-check');
+            $this->cacheRepository = $cache;
+        } catch (\Throwable $e) {
+            $this->cacheRepository = Cache::store('file');
+        }
+
+        return $this->cacheRepository;
     }
 
     private function clamp(int $value, int $min, int $max): int

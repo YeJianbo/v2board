@@ -29,6 +29,9 @@ return [
     */
 
     'connections' => [
+        'agent' => [
+            'driver' => 'redis', 'connection' => 'default', 'queue' => 'panel_agent', 'retry_after' => 240, 'block_for' => 2,
+        ],
 
         'sync' => [
             'driver' => 'sync',

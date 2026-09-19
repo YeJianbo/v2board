@@ -1,0 +1,26 @@
+[Unit]
+Description=BunCloud model API relay
+After=network.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/www/wwwroot/v2.151376.xyz
+ExecStart=/www/wwwroot/v2.151376.xyz/services/model-relay/relay
+Environment=RELAY_PANEL_URL=http://127.0.0.1
+Environment=RELAY_PANEL_HOST=v2.151376.xyz
+Environment=RELAY_SECRET_FILE=/www/wwwroot/v2.151376.xyz/storage/app/integrations/model-relay-gateway.key
+Environment=RELAY_SPOOL=/www/wwwroot/v2.151376.xyz/storage/app/model-relay-spool
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+MemoryMax=192M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/www/wwwroot/v2.151376.xyz/storage/app/model-relay-spool
+
+[Install]
+WantedBy=multi-user.target

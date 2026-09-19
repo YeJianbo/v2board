@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Jobs\OrderHandleJob;
+use App\Models\Coupon;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class OrderService
 {
@@ -28,77 +30,84 @@ class OrderService
 
     public function open()
     {
-        $order = $this->order;
-        $this->user = User::find($order->user_id);
-        if ($order->type == 9) {
-            DB::beginTransaction();
-            $this->user->balance += $order->total_amount + $this->getbounus($order->total_amount);
-
-            if (!$this->user->save()) {
-                DB::rollBack();
-                abort(500, '充值失败');
+        return DB::transaction(function () {
+            $order = Order::whereKey($this->order->id)->lockForUpdate()->first();
+            if (!$order) {
+                return false;
             }
-            $order->status = 3;
-            if (!$order->save()) {
-                DB::rollBack();
-                abort(500, '充值失败');
+            if ((int)$order->status === 3) {
+                return true;
             }
-            DB::commit();
-            return;
-        }
+            if ((int)$order->status !== 1) {
+                return false;
+            }
 
-        $plan = Plan::find($order->plan_id);
+            $this->order = $order;
+            $this->user = User::whereKey($order->user_id)->lockForUpdate()->first();
+            if (!$this->user) {
+                throw new \RuntimeException('订单用户不存在');
+            }
 
-        if ($order->refund_amount) {
-            $this->user->balance = $this->user->balance + $order->refund_amount;
-        }
-        DB::beginTransaction();
-        if ($order->surplus_order_ids) {
-            try {
+            if ((int)$order->type === 9) {
+                $this->user->balance += $order->total_amount + $this->getbounus($order->total_amount);
+                if (!$this->user->save()) {
+                    throw new \RuntimeException('充值失败');
+                }
+                $order->status = 3;
+                if (!$order->save()) {
+                    throw new \RuntimeException('充值失败');
+                }
+                return true;
+            }
+
+            $plan = Plan::find($order->plan_id);
+            if (!$plan) {
+                throw new \RuntimeException('订阅计划不存在');
+            }
+
+            if ($order->refund_amount) {
+                $this->user->balance += $order->refund_amount;
+            }
+            if ($order->surplus_order_ids) {
                 Order::whereIn('id', $order->surplus_order_ids)->update([
                     'status' => 4
                 ]);
-            } catch (\Exception $e) {
-                DB::rollback();
-                abort(500, '开通失败');
             }
-        }
-        switch ((string)$order->period) {
-            case 'onetime_price':
-                $this->buyByOneTime($order, $plan);
-                break;
-            case 'reset_price':
-                $this->buyByResetTraffic();
-                break;
-            default:
-                $this->buyByPeriod($order, $plan);
-        }
 
-        switch ((int)$order->type) {
-            case 1:
-                $this->openEvent(config('v2board.new_order_event_id', 0));
-                break;
-            case 2:
-                $this->openEvent(config('v2board.renew_order_event_id', 0));
-                break;
-            case 3:
-                $this->openEvent(config('v2board.change_order_event_id', 0));
-                break;
-        }
+            switch ((string)$order->period) {
+                case 'onetime_price':
+                    $this->buyByOneTime($order, $plan);
+                    break;
+                case 'reset_price':
+                    $this->buyByResetTraffic();
+                    break;
+                default:
+                    $this->buyByPeriod($order, $plan);
+            }
 
-        $this->setSpeedLimit($plan->speed_limit);
+            switch ((int)$order->type) {
+                case 1:
+                    $this->openEvent(config('v2board.new_order_event_id', 0));
+                    break;
+                case 2:
+                    $this->openEvent(config('v2board.renew_order_event_id', 0));
+                    break;
+                case 3:
+                    $this->openEvent(config('v2board.change_order_event_id', 0));
+                    break;
+            }
 
-        if (!$this->user->save()) {
-            DB::rollBack();
-            abort(500, '开通失败');
-        }
-        $order->status = 3;
-        if (!$order->save()) {
-            DB::rollBack();
-            abort(500, '开通失败');
-        }
+            $this->setSpeedLimit($plan->speed_limit);
+            if (!$this->user->save()) {
+                throw new \RuntimeException('开通失败');
+            }
+            $order->status = 3;
+            if (!$order->save()) {
+                throw new \RuntimeException('开通失败');
+            }
 
-        DB::commit();
+            return true;
+        }, 3);
     }
 
 
@@ -256,38 +265,113 @@ class OrderService
 
     public function paid(string $callbackNo)
     {
-        $order = $this->order;
-        if ($order->status !== 0) return true;
-        $order->status = 1;
-        $order->paid_at = time();
-        $order->callback_no = $callbackNo;
-        if (!$order->save()) return false;
+        $shouldDispatch = false;
+        $tradeNo = $this->order->trade_no;
+
         try {
-            OrderHandleJob::dispatch($order->trade_no);
-        } catch (\Exception $e) {
+            $accepted = DB::transaction(function () use ($callbackNo, &$shouldDispatch, &$tradeNo) {
+                $order = Order::whereKey($this->order->id)->lockForUpdate()->first();
+                if (!$order) {
+                    return false;
+                }
+
+                $status = (int)$order->status;
+                if (in_array($status, [1, 3, 4], true)) {
+                    return true;
+                }
+                if ($status !== 0) {
+                    return false;
+                }
+
+                $order->status = 1;
+                $order->paid_at = time();
+                $order->callback_no = $callbackNo;
+                if (!$order->save()) {
+                    throw new \RuntimeException('订单支付状态保存失败');
+                }
+
+                $this->order = $order;
+                $tradeNo = $order->trade_no;
+                $shouldDispatch = true;
+                return true;
+            }, 3);
+        } catch (\Throwable $e) {
+            Log::error('订单支付状态迁移失败', [
+                'trade_no' => $tradeNo,
+                'exception' => $e,
+            ]);
             return false;
+        }
+
+        if (!$accepted) {
+            return false;
+        }
+        if (!$shouldDispatch) {
+            return true;
+        }
+
+        try {
+            OrderHandleJob::dispatch($tradeNo);
+        } catch (\Throwable $e) {
+            // check:order 会重新派发 status=1 的订单，不能把已收款状态回滚为待支付。
+            Log::error('订单开通任务派发失败，等待定时任务恢复', [
+                'trade_no' => $tradeNo,
+                'exception' => $e,
+            ]);
         }
         return true;
     }
 
     public function cancel():bool
     {
-        $order = $this->order;
-        DB::beginTransaction();
-        $order->status = 2;
-        if (!$order->save()) {
-            DB::rollBack();
-            return false;
-        }
-        if ($order->balance_amount) {
-            $userService = new UserService();
-            if (!$userService->addBalance($order->user_id, $order->balance_amount)) {
-                DB::rollBack();
+        try {
+            return DB::transaction(function () {
+                $order = Order::whereKey($this->order->id)->lockForUpdate()->first();
+                if (!$order) {
+                    return false;
+                }
+                if ((int)$order->status === 2) {
+                    return true;
+                }
+                if ((int)$order->status !== 0) {
+                    return false;
+                }
+
+                if ($order->balance_amount) {
+                    $user = User::whereKey($order->user_id)->lockForUpdate()->first();
+                    if (!$user) {
+                        throw new \RuntimeException('订单用户不存在');
+                    }
+                    $user->balance += (int)$order->balance_amount;
+                    if (!$user->save()) {
+                        throw new \RuntimeException('订单余额退回失败');
+                    }
+                }
+
+                if ($order->coupon_id) {
+                    $coupon = Coupon::whereKey($order->coupon_id)->lockForUpdate()->first();
+                    if ($coupon && $coupon->limit_use !== null) {
+                        $coupon->limit_use = (int)$coupon->limit_use + 1;
+                        if (!$coupon->save()) {
+                            throw new \RuntimeException('优惠券次数归还失败');
+                        }
+                    }
+                }
+
+                $order->status = 2;
+                if (!$order->save()) {
+                    throw new \RuntimeException('订单取消失败');
+                }
+                $this->order = $order;
+                return true;
+            }, 3);
+        } catch (\Throwable $e) {
+            Log::error('订单取消失败', [
+                'trade_no' => $this->order->trade_no,
+                'exception' => $e,
+            ]);
                 return false;
-            }
         }
-        DB::commit();
-        return true;
     }
 
     private function setSpeedLimit($speedLimit)

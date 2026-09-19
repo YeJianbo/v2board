@@ -49,6 +49,7 @@ class UserRoute
             $router->get ('/ticket/fetch', 'V1\\User\\TicketController@fetch');
             $router->post('/ticket/withdraw', 'V1\\User\\TicketController@withdraw');
             // Server
+            $router->get('/machine/monitor', 'V1\\User\\MachineMonitorController@fetch');
             $router->get ('/server/fetch', 'V1\\User\\ServerController@fetch');
             // Coupon
             $router->post('/coupon/check', 'V1\\User\\CouponController@check');

@@ -4,6 +4,8 @@ namespace App\Http\Controllers\V2\Server;
 
 use App\Http\Controllers\Controller;
 use App\Services\ServerService;
+use App\Services\RavelCredentialService;
+use App\Support\RavelConfig;
 use Illuminate\Http\Request;
 use App\Utils\Helper;
 use App\Utils\CacheKey;
@@ -54,7 +56,9 @@ class ServerController extends Controller
             return $configValue;
         }
 
-        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        $dbValue = Cache::remember('panel_setting:' . $key, 60, static function () use ($key) {
+            return DB::table('v2_settings')->where('name', $key)->value('value');
+        });
         if ($dbValue !== null && $dbValue !== '') {
             return $dbValue;
         }
@@ -62,9 +66,27 @@ class ServerController extends Controller
         return $default;
     }
 
+    private function etagMatches(Request $request, string $etag): bool
+    {
+        $header = (string)$request->header('If-None-Match', '');
+        foreach (explode(',', $header) as $candidate) {
+            $candidate = trim($candidate);
+            if (str_starts_with($candidate, 'W/')) {
+                $candidate = substr($candidate, 2);
+            }
+            if (trim($candidate, "\"") === $etag || $candidate === '*') {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function __construct(Request $request)
     {
-        $token = $request->input('token');
+        $token = $request->bearerToken();
+        if ($token === null || $token === '') {
+            $token = $request->input('token');
+        }
 
         // token 为空（业务失败，不抛异常）
         if (empty($token)) {
@@ -142,6 +164,10 @@ class ServerController extends Controller
             $response['ignore_client_bandwidth'] = false;
         }
 
+        if ((string) $this->nodeInfo->protocol === 'ravel') {
+            $response['ravel'] = RavelConfig::nodePayload($this->nodeInfo);
+        }
+
         $response['base_config'] = [
             'push_interval' => (int)config('v2board.server_push_interval', 60),
             'pull_interval' => (int)config('v2board.server_pull_interval', 60),
@@ -156,11 +182,34 @@ class ServerController extends Controller
         $rsp = json_encode($response);
         $eTag = sha1($rsp);
 
+        if ((string) $this->nodeInfo->protocol === 'ravel') {
+            return response($response)->header('ETag', "\"{$eTag}\"")
+                ->header('Cache-Control', 'private, no-store');
+        }
+
         // 不使用 abort(304)，避免异常路径
-        if ($request->header('If-None-Match') === $eTag) {
+        if ($this->etagMatches($request, $eTag)) {
             return response('', 304)->header('ETag', "\"{$eTag}\"");
         }
 
         return response($response)->header('ETag', "\"{$eTag}\"");
+    }
+
+    public function user(Request $request)
+    {
+        Cache::put(CacheKey::get('SERVER_V2NODE_LAST_CHECK_AT', $this->nodeInfo->id), time(), 3600);
+        $users = $this->serverService->getAvailableUsers($this->nodeInfo->group_id);
+        if ((string) $this->nodeInfo->protocol === 'ravel') {
+            return response()->json(['users' => (new RavelCredentialService())->userPayloads($this->nodeInfo, $users)])
+                ->header('Cache-Control', 'private, no-store');
+        }
+        $payload = ['users' => $users->map(function ($user) {
+            return array_filter($user->toArray(), static function ($value) { return $value !== null; });
+        })->values()->all()];
+        $eTag = sha1(json_encode($payload));
+        if ($this->etagMatches($request, $eTag)) {
+            return response('', 304)->header('ETag', "\"{$eTag}\"");
+        }
+        return response()->json($payload)->header('ETag', "\"{$eTag}\"");
     }
 }

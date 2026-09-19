@@ -18,4 +18,11 @@ class ExampleTest extends TestCase
 
         $response->assertStatus(200);
     }
+
+    public function testPublicStatusDataReturnsAnEmptyListBeforeMachineTablesExist()
+    {
+        $response = $this->get('/status.json');
+
+        $response->assertStatus(200)->assertExactJson(['data' => []]);
+    }
 }

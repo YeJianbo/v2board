@@ -10,6 +10,7 @@ use App\Services\TelegramService;
 use App\Services\XboardThemeService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 
 class ConfigController extends Controller
 {
@@ -94,12 +95,14 @@ class ConfigController extends Controller
     public function fetch(Request $request)
     {
         $key = $request->input('key');
-        $configMappings = $this->getConfigMappings();
-        if ($key && isset($configMappings[$key])) {
-            return $this->success([$key => $configMappings[$key]]);
+        if ($key) {
+            $configMappings = $this->getConfigMappings($key);
+            if (isset($configMappings[$key])) {
+                return $this->success([$key => $configMappings[$key]]);
+            }
         }
 
-        return $this->success($configMappings);
+        return $this->success($this->getConfigMappings());
     }
 
     /**
@@ -107,10 +110,11 @@ class ConfigController extends Controller
      * 
      * @return array 配置映射数组
      */
-    private function getConfigMappings(): array
+    private function getConfigMappings(?string $key = null): array
     {
-        return [
-            'invite' => [
+        $factories = [
+            'invite' => function (): array {
+                return [
                 'invite_force' => (bool) admin_setting('invite_force', 0),
                 'invite_commission' => admin_setting('invite_commission', 10),
                 'invite_gen_limit' => admin_setting('invite_gen_limit', 5),
@@ -124,8 +128,10 @@ class ConfigController extends Controller
                 'commission_distribution_l1' => admin_setting('commission_distribution_l1'),
                 'commission_distribution_l2' => admin_setting('commission_distribution_l2'),
                 'commission_distribution_l3' => admin_setting('commission_distribution_l3')
-            ],
-            'site' => [
+                ];
+            },
+            'site' => function (): array {
+                return [
                 'logo' => admin_setting('logo'),
                 'force_https' => (int) admin_setting('force_https', 0),
                 'user_frontend_enable' => (int) admin_setting('user_frontend_enable', 1),
@@ -140,8 +146,10 @@ class ConfigController extends Controller
                 'currency' => admin_setting('currency', 'CNY'),
                 'currency_symbol' => admin_setting('currency_symbol', '¥'),
                 'ticket_must_wait_reply' => (bool) admin_setting('ticket_must_wait_reply', 0),
-            ],
-            'subscribe' => [
+                ];
+            },
+            'subscribe' => function (): array {
+                return [
                 'plan_change_enable' => (bool) admin_setting('plan_change_enable', 1),
                 'reset_traffic_method' => (int) admin_setting('reset_traffic_method', 0),
                 'surplus_enable' => (bool) admin_setting('surplus_enable', 1),
@@ -154,24 +162,33 @@ class ConfigController extends Controller
                 'show_subscribe_expire' => (int) admin_setting('show_subscribe_expire', 5),
                 'default_remind_expire' => (bool) admin_setting('default_remind_expire', 1),
                 'default_remind_traffic' => (bool) admin_setting('default_remind_traffic', 1),
+                'ticket_reply_limit' => (bool) admin_setting('ticket_reply_limit', 0),
+                'ticket_active_subscription_required' => (bool) admin_setting('ticket_active_subscription_required', 0),
                 'subscribe_path' => admin_setting('subscribe_path', 's'),
-            ],
-            'frontend' => [
+                ];
+            },
+            'frontend' => function (): array {
+                return [
                 'frontend_theme' => admin_setting('frontend_theme', 'xboard'),
                 'frontend_theme_sidebar' => admin_setting('frontend_theme_sidebar', 'light'),
                 'frontend_theme_header' => admin_setting('frontend_theme_header', 'dark'),
                 'frontend_theme_color' => admin_setting('frontend_theme_color', 'default'),
                 'frontend_background_url' => admin_setting('frontend_background_url'),
-            ],
-            'server' => [
+                ];
+            },
+            'server' => function (): array {
+                return [
                 'server_token' => admin_setting('server_token'),
                 'server_pull_interval' => admin_setting('server_pull_interval', 60),
                 'server_push_interval' => admin_setting('server_push_interval', 60),
                 'device_limit_mode' => (int) admin_setting('device_limit_mode', 0),
                 'server_ws_enable' => (bool) admin_setting('server_ws_enable', 1),
                 'server_ws_url' => admin_setting('server_ws_url', ''),
-            ],
-            'email' => [
+                ];
+            },
+            'email' => function (): array {
+                return [
+                'email_template' => admin_setting('email_template', 'default'),
                 'email_host' => admin_setting('email_host'),
                 'email_port' => admin_setting('email_port'),
                 'email_username' => admin_setting('email_username'),
@@ -179,8 +196,10 @@ class ConfigController extends Controller
                 'email_encryption' => admin_setting('email_encryption'),
                 'email_from_address' => admin_setting('email_from_address'),
                 'remind_mail_enable' => (bool) admin_setting('remind_mail_enable', false),
-            ],
-            'telegram' => [
+                ];
+            },
+            'telegram' => function (): array {
+                return [
                 'telegram_bot_enable' => (bool) admin_setting('telegram_bot_enable', 0),
                 'telegram_bot_token' => admin_setting('telegram_bot_token'),
                 'telegram_webhook_url' => admin_setting('telegram_webhook_url'),
@@ -202,21 +221,38 @@ class ConfigController extends Controller
                 'telegram_machine_disk_threshold' => (int) admin_setting('telegram_machine_disk_threshold', 95),
                 'telegram_machine_network_alert_enable' => (bool) admin_setting('telegram_machine_network_alert_enable', 0),
                 'telegram_machine_network_mbps_threshold' => (float) admin_setting('telegram_machine_network_mbps_threshold', 0),
+                'telegram_machine_quality_alert_enable' => (bool) admin_setting('telegram_machine_quality_alert_enable', 0),
+                'telegram_machine_quality_latency_threshold' => (float) admin_setting('telegram_machine_quality_latency_threshold', 300),
+                'telegram_machine_quality_loss_threshold' => (float) admin_setting('telegram_machine_quality_loss_threshold', 30),
+                'telegram_machine_quality_consecutive_count' => (int) admin_setting('telegram_machine_quality_consecutive_count', 3),
+                'telegram_machine_quality_cooldown_seconds' => (int) admin_setting('telegram_machine_quality_cooldown_seconds', 1800),
                 'telegram_user_traffic_alert_enable' => (bool) admin_setting('telegram_user_traffic_alert_enable', 1),
                 'telegram_user_traffic_threshold' => (int) admin_setting('telegram_user_traffic_threshold', 95),
-            ],
-            'app' => [
+                ];
+            },
+            'app' => function (): array {
+                return [
                 'windows_version' => admin_setting('windows_version', ''),
                 'windows_download_url' => admin_setting('windows_download_url', ''),
                 'macos_version' => admin_setting('macos_version', ''),
                 'macos_download_url' => admin_setting('macos_download_url', ''),
                 'android_version' => admin_setting('android_version', ''),
                 'android_download_url' => admin_setting('android_download_url', '')
-            ],
-            'safe' => [
+                ];
+            },
+            'safe' => function (): array {
+                return [
                 'email_verify' => (bool) admin_setting('email_verify', 0),
                 'safe_mode_enable' => (bool) admin_setting('safe_mode_enable', 0),
                 'secure_path' => admin_setting('secure_path', admin_setting('frontend_admin_path', hash('crc32b', config('app.key')))),
+                'frontend_user_path' => admin_setting('frontend_user_path', 'user'),
+                'homepage_mode' => admin_setting('homepage_mode', 'monitor'),
+                'user_frontend_enable' => (bool) admin_setting('user_frontend_enable', 1),
+                'public_status_enable' => (bool) admin_setting('public_status_enable', 1),
+                'google_login_enable' => (bool) admin_setting('google_login_enable', 0),
+                'google_client_id' => admin_setting('google_client_id', ''),
+                'google_client_secret' => admin_setting('google_client_secret', ''),
+                'google_redirect_uri' => admin_setting('google_redirect_uri', ''),
                 'email_whitelist_enable' => (bool) admin_setting('email_whitelist_enable', 0),
                 'email_whitelist_suffix' => admin_setting('email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT),
                 'email_gmail_limit_enable' => (bool) admin_setting('email_gmail_limit_enable', 0),
@@ -237,29 +273,46 @@ class ConfigController extends Controller
                 'password_limit_expire' => admin_setting('password_limit_expire', 60),
                 // 保持向后兼容
                 'recaptcha_enable' => (bool) admin_setting('captcha_enable', 0)
-            ],
-            'subscribe_template' => [
+                ];
+            },
+            'subscribe_template' => function (): array {
+                return [
                 'subscribe_template_singbox' => $this->formatTemplateContent(
                     subscribe_template('singbox') ?? '',
                     'json'
                 ),
                 'subscribe_template_clash' => subscribe_template('clash') ?? '',
                 'subscribe_template_clashmeta' => subscribe_template('clashmeta') ?? '',
+                'subscribe_template_clashverge' => subscribe_template('clashverge') ?? '',
                 'subscribe_template_stash' => subscribe_template('stash') ?? '',
                 'subscribe_template_surge' => subscribe_template('surge') ?? '',
                 'subscribe_template_surfboard' => subscribe_template('surfboard') ?? ''
-            ],
-            'backup' => [
+                ];
+            },
+            'backup' => function (): array {
+                return [
                 'backup_enable' => (bool) admin_setting('backup_enable', false),
                 'backup_type' => admin_setting('backup_type', 'database'),
+                'backup_storage' => $this->resolveBackupStorage(),
                 'backup_frequency' => admin_setting('backup_frequency', 'daily'),
                 'backup_time' => admin_setting('backup_time', '03:30'),
                 'backup_local_path' => admin_setting('backup_local_path', ''),
                 'backup_remote' => admin_setting('backup_remote', ''),
                 'backup_keep_days' => (int) admin_setting('backup_keep_days', 14),
                 'backup_password' => admin_setting('backup_password', ''),
-            ]
+                ];
+            },
         ];
+
+        if ($key !== null) {
+            return isset($factories[$key]) ? [$key => $factories[$key]()] : [];
+        }
+
+        $mappings = [];
+        foreach ($factories as $mappingKey => $factory) {
+            $mappings[$mappingKey] = $factory();
+        }
+        return $mappings;
     }
 
     public function save(ConfigSave $request)
@@ -270,11 +323,23 @@ class ConfigController extends Controller
             'subscribe_template_singbox' => 'singbox',
             'subscribe_template_clash' => 'clash',
             'subscribe_template_clashmeta' => 'clashmeta',
+            'subscribe_template_clashverge' => 'clashverge',
             'subscribe_template_stash' => 'stash',
             'subscribe_template_surge' => 'surge',
             'subscribe_template_surfboard' => 'surfboard',
         ];
 
+        try {
+            foreach ($templateKeys as $requestKey => $templateName) {
+                if (array_key_exists($requestKey, $data)) {
+                    SubscribeTemplate::validateContent($templateName, (string) $data[$requestKey]);
+                }
+            }
+        } catch (\InvalidArgumentException $e) {
+            return $this->fail([422, $e->getMessage()]);
+        }
+
+        $settings = [];
         foreach ($data as $k => $v) {
             if (isset($templateKeys[$k])) {
                 SubscribeTemplate::setContent($templateKeys[$k], $v);
@@ -284,10 +349,27 @@ class ConfigController extends Controller
                 $themeService = app(XboardThemeService::class);
                 $themeService->switch($v);
             }
-            admin_setting([$k => $v]);
+            $settings[$k] = $v;
+        }
+
+        if ($settings !== []) {
+            admin_setting($settings);
+            // Rebuilding in this request can cache the previously loaded settings.
+            Artisan::call('config:clear');
+            if (array_intersect(array_keys($settings), ['frontend_user_path', 'secure_path', 'subscribe_path'])) Artisan::call('route:clear');
         }
 
         return $this->success(true);
+    }
+
+    private function resolveBackupStorage(): string
+    {
+        $storage = (string) admin_setting('backup_storage', '');
+        if (in_array($storage, ['local', 'google_drive', 'rclone'], true)) {
+            return $storage;
+        }
+
+        return trim((string) admin_setting('backup_remote', '')) !== '' ? 'rclone' : 'local';
     }
 
     /**

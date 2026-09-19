@@ -2,6 +2,8 @@
 
 namespace App\Protocols;
 
+use App\Models\SubscribeTemplate;
+use App\Services\SubscriptionResponse;
 use App\Utils\Helper;
 use Symfony\Component\Yaml\Yaml;
 
@@ -26,21 +28,7 @@ class ClashNyanpasu
         $user = $this->user;
         $appName = config('v2board.app_name', 'V2Board');
         $appUrl = config('v2board.app_url');
-        header("subscription-userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}");
-        header('profile-update-interval: 24');
-        header('profile-title: base64:' . base64_encode($appName));
-        if ($appUrl) {
-            header('profile-web-page-url: ' . $appUrl);
-            header('support-url: ' . $appUrl);
-        }
-        header("content-disposition:attachment;filename*=UTF-8''".rawurlencode($appName));
-        $defaultConfig = base_path() . '/resources/rules/default.clash.yaml';
-        $customConfig = base_path() . '/resources/rules/custom2.clash.yaml';
-        if (\File::exists($customConfig)) {
-            $config = Yaml::parseFile($customConfig);
-        } else {
-            $config = Yaml::parseFile($defaultConfig);
-        }
+        $config = SubscribeTemplate::parseYaml('clashmeta');
         $proxy = [];
         $proxies = [];
         $clientInfo = $this->getClientInfo();
@@ -111,7 +99,6 @@ class ClashNyanpasu
             return $group['proxies'];
         });
         $config['proxy-groups'] = array_values($config['proxy-groups']);
-        $config = $this->externalizeRulesForProviders($config);
         // Force the current subscription domain to be a direct rule
         //$subsDomain = $_SERVER['HTTP_HOST'];
         //if ($subsDomain) {
@@ -120,12 +107,12 @@ class ClashNyanpasu
 
         $yaml = Yaml::dump($config, 2, 4, Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE);
         $yaml = str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
-        return response($yaml, 200, [
+        return response($yaml, 200, array_merge(SubscriptionResponse::headers($user, $appName, $appUrl), [
             'Content-Type' => 'text/yaml; charset=utf-8',
             'Content-Length' => strlen($yaml),
             'Cache-Control' => 'no-store, no-transform',
             'X-Accel-Buffering' => 'no',
-        ]);
+        ]));
     }
 
     private function getClientInfo(): array
@@ -185,115 +172,6 @@ class ClashNyanpasu
             !empty($tlsSettings['public_key']) ||
             !empty($tlsSettings['short_id'])
         );
-    }
-
-    private function externalizeRulesForProviders(array $config): array
-    {
-        $providerMap = $this->getRuleProviderMap();
-        $providerBaseUrl = rtrim(config('v2board.app_url') ?: request()->getSchemeAndHttpHost(), '/')
-            . '/rules/clash/';
-        $providers = is_array($config['rule-providers'] ?? null) ? $config['rule-providers'] : [];
-        $rules = [];
-        $usedProviders = [];
-        $deferredMatchRules = [];
-
-        foreach (($config['rules'] ?? []) as $rule) {
-            if (!is_string($rule)) {
-                continue;
-            }
-            $rule = trim($rule);
-            if ($rule === '' || strpos($rule, '#') === 0) {
-                continue;
-            }
-
-            $parts = array_map('trim', explode(',', $rule));
-            $type = strtoupper($parts[0] ?? '');
-            if ($type === 'MATCH') {
-                $deferredMatchRules[] = $rule;
-                continue;
-            }
-            if ($type === 'RULE-SET') {
-                $rules[] = $rule;
-                continue;
-            }
-
-            $targetIndex = count($parts) - 1;
-            if ($targetIndex > 1 && strtolower($parts[$targetIndex]) === 'no-resolve') {
-                $targetIndex--;
-            }
-            $target = $parts[$targetIndex] ?? null;
-            if ($target === '🌐 IPv6') {
-                $rules[] = $rule;
-                continue;
-            }
-            if (!$target || !isset($providerMap[$target])) {
-                $rules[] = $rule;
-                continue;
-            }
-
-            $provider = $providerMap[$target];
-            $providerName = $provider['name'];
-            if (empty($usedProviders[$providerName])) {
-                $rules[] = "RULE-SET,{$providerName},{$target}";
-                $usedProviders[$providerName] = true;
-            }
-            if (!isset($providers[$providerName])) {
-                $providers[$providerName] = [
-                    'type' => 'http',
-                    'behavior' => 'classical',
-                    'url' => $providerBaseUrl . $provider['file'],
-                    'path' => './BunCloud/' . $provider['file'],
-                    'interval' => 86400,
-                ];
-            }
-        }
-
-        if (!empty($usedProviders['BunCloudDirect'])) {
-            $rules[] = 'GEOIP,CN,🎯 全球直连,no-resolve';
-        }
-
-        $config['rule-providers'] = $providers;
-        $config['rules'] = array_values(array_unique(array_merge(
-            $this->getSubscriptionBunCloudRules(),
-            $rules,
-            $deferredMatchRules
-        )));
-        return $config;
-    }
-
-    private function getSubscriptionBunCloudRules(): array
-    {
-        return [
-            'DOMAIN-SUFFIX,151376.xyz,🐻 BunCloud',
-            'DOMAIN-SUFFIX,buncloud.eu.org,🐻 BunCloud',
-        ];
-    }
-
-    private function getRuleProviderMap(): array
-    {
-        return [
-            '🚀 节点选择' => ['name' => 'BunCloudProxy', 'file' => 'proxy.yaml'],
-            '🌍 国外媒体' => ['name' => 'BunCloudMedia', 'file' => 'media.yaml'],
-            '💡 OpenAI' => ['name' => 'BunCloudOpenAI', 'file' => 'openai.yaml'],
-            '▶️ YouTube' => ['name' => 'BunCloudYouTube', 'file' => 'youtube.yaml'],
-            '🔍 Google' => ['name' => 'BunCloudGoogle', 'file' => 'google.yaml'],
-            '📸 Facebook' => ['name' => 'BunCloudFacebook', 'file' => 'facebook.yaml'],
-            '𝕏 Twitter' => ['name' => 'BunCloudTwitter', 'file' => 'twitter.yaml'],
-            'ᯤ Spotify' => ['name' => 'BunCloudSpotify', 'file' => 'spotify.yaml'],
-            '📢 谷歌FCM' => ['name' => 'BunCloudGoogleFCM', 'file' => 'google-fcm.yaml'],
-            '📲 电报信息' => ['name' => 'BunCloudTelegram', 'file' => 'telegram.yaml'],
-            'Ⓜ️ 微软服务' => ['name' => 'BunCloudMicrosoft', 'file' => 'microsoft.yaml'],
-            '🍎 苹果服务' => ['name' => 'BunCloudApple', 'file' => 'apple.yaml'],
-            '🅱 哔哩哔哩' => ['name' => 'BunCloudBilibili', 'file' => 'bilibili.yaml'],
-            '💬 微信消息' => ['name' => 'BunCloudWeChat', 'file' => 'wechat.yaml'],
-            '🧑‍💻 GitHub' => ['name' => 'BunCloudGitHub', 'file' => 'github.yaml'],
-            '🧰 开发环境' => ['name' => 'BunCloudDev', 'file' => 'dev.yaml'],
-            '🐻 BunCloud' => ['name' => 'BunCloudSite', 'file' => 'buncloud.yaml'],
-            '🎯 全球直连' => ['name' => 'BunCloudDirect', 'file' => 'direct.yaml'],
-            '🌐 IPv6' => ['name' => 'BunCloudIPv6', 'file' => 'ipv6.yaml'],
-            'REJECT' => ['name' => 'BunCloudReject', 'file' => 'reject.yaml'],
-            'DIRECT' => ['name' => 'BunCloudProcessDirect', 'file' => 'process-direct.yaml'],
-        ];
     }
 
     public static function buildShadowsocks($password, $server)

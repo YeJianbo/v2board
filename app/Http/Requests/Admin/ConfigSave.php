@@ -25,6 +25,7 @@ class ConfigSave extends FormRequest
         'logo' => 'nullable|url',
         'force_https' => '',
         'user_frontend_enable' => 'boolean',
+        'homepage_mode' => 'in:monitor,user,closed',
         'stop_register' => '',
         'app_name' => '',
         'app_description' => '',
@@ -49,6 +50,8 @@ class ConfigSave extends FormRequest
         'show_subscribe_method' => 'integer|in:0,1,2,3',
         'show_subscribe_expire' => 'integer|min:1|max:1440',
         'subscribe_path' => '',
+        'ticket_reply_limit' => 'boolean',
+        'ticket_active_subscription_required' => 'boolean',
         // server
         'server_token' => 'nullable|min:16',
         'server_pull_interval' => 'integer',
@@ -69,6 +72,7 @@ class ConfigSave extends FormRequest
         'email_password' => '',
         'email_encryption' => '',
         'email_from_address' => '',
+        'email_template' => 'nullable|string',
         'remind_mail_enable' => '',
         // telegram
         'telegram_bot_enable' => '',
@@ -92,6 +96,11 @@ class ConfigSave extends FormRequest
         'telegram_machine_disk_threshold' => 'integer|min:1|max:100',
         'telegram_machine_network_alert_enable' => 'boolean',
         'telegram_machine_network_mbps_threshold' => 'numeric|min:0|max:1000000',
+        'telegram_machine_quality_alert_enable' => 'boolean',
+        'telegram_machine_quality_latency_threshold' => 'numeric|min:1|max:60000',
+        'telegram_machine_quality_loss_threshold' => 'numeric|min:1|max:100',
+        'telegram_machine_quality_consecutive_count' => 'integer|min:1|max:30',
+        'telegram_machine_quality_cooldown_seconds' => 'integer|min:60|max:86400',
         'telegram_user_traffic_alert_enable' => 'boolean',
         'telegram_user_traffic_threshold' => 'integer|min:50|max:100',
         // app
@@ -121,6 +130,12 @@ class ConfigSave extends FormRequest
         'register_limit_count' => 'integer',
         'register_limit_expire' => 'integer',
         'secure_path' => 'min:8|regex:/^[\w-]*$/',
+        'frontend_user_path' => 'sometimes|required|string|min:3|max:64|regex:/^[A-Za-z0-9_-]+$/|different:secure_path|not_in:admin,api,assets,theme,storage,vendor,livewire,_debugbar',
+        'public_status_enable' => 'boolean',
+        'google_login_enable' => 'boolean',
+        'google_client_id' => 'nullable|string',
+        'google_client_secret' => 'nullable|string',
+        'google_redirect_uri' => 'nullable|url',
         'password_limit_enable' => 'boolean',
         'password_limit_count' => 'integer',
         'password_limit_expire' => 'integer',
@@ -129,12 +144,14 @@ class ConfigSave extends FormRequest
         'subscribe_template_singbox' => 'nullable',
         'subscribe_template_clash' => 'nullable',
         'subscribe_template_clashmeta' => 'nullable',
+        'subscribe_template_clashverge' => 'nullable',
         'subscribe_template_stash' => 'nullable',
         'subscribe_template_surge' => 'nullable',
         'subscribe_template_surfboard' => 'nullable',
         // backup
         'backup_enable' => 'boolean',
         'backup_type' => 'in:database,migration',
+        'backup_storage' => 'in:local,google_drive,rclone',
         'backup_frequency' => 'in:daily,weekly',
         'backup_time' => ['regex:/^(?:[01]\d|2[0-3]):[0-5]\d$/'],
         'backup_local_path' => 'nullable|string|max:500',
@@ -152,6 +169,19 @@ class ConfigSave extends FormRequest
         return self::RULES;
     }
 
+    public function withValidator($validator)
+    {
+        $validator->after(function ($validator) {
+            if (!$this->hasAny(['frontend_user_path', 'secure_path', 'subscribe_path'])) return;
+            $user = (string) $this->input('frontend_user_path', config('v2board.frontend_user_path', 'user'));
+            $admin = (string) $this->input('secure_path', config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))));
+            $subscribe = explode('/', trim((string) $this->input('subscribe_path', config('v2board.subscribe_path', '')), '/'))[0];
+            if (!preg_match('/^[A-Za-z0-9_-]{3,64}$/D', $user) || in_array(strtolower($user), ['admin','api','assets','theme','storage','vendor','livewire','_debugbar'], true) || $user === $admin || ($subscribe !== '' && $user === $subscribe)) {
+                $validator->errors()->add('frontend_user_path', '用户入口须为3-64位字母、数字、下划线或连字符，且不能与后台或系统路由冲突');
+            }
+        });
+    }
+
     public function messages()
     {
         // illiteracy prompt
@@ -165,6 +195,11 @@ class ConfigSave extends FormRequest
             'logo.url' => 'LOGO URL格式不正确，必须携带https(s)://',
             'secure_path.min' => '后台路径长度最小为8位',
             'secure_path.regex' => '后台路径只能为字母或数字',
+            'frontend_user_path.required' => '用户前台路径不能为空',
+            'frontend_user_path.min' => '用户前台路径长度最小为3位',
+            'frontend_user_path.regex' => '用户前台路径只能为字母、数字、下划线或连字符',
+            'frontend_user_path.different' => '用户前台路径不能与后台路径相同',
+            'frontend_user_path.not_in' => '用户前台路径不能使用系统保留名称',
             'captcha_type.in' => '人机验证类型只能选择 recaptcha、turnstile 或 recaptcha-v3',
             'recaptcha_v3_score_threshold.numeric' => 'reCAPTCHA v3 分数阈值必须为数字',
             'recaptcha_v3_score_threshold.min' => 'reCAPTCHA v3 分数阈值不能小于0',

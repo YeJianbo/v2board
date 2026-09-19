@@ -2,6 +2,7 @@
 
 namespace App\Console;
 
+use App\Services\Plugin\PluginManager;
 use App\Utils\CacheKey;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
@@ -40,6 +41,20 @@ class Kernel extends ConsoleKernel
         // reset
         $schedule->command('reset:traffic')->daily()->onOneServer()->withoutOverlapping(10);
         $schedule->command('reset:log')->daily()->onOneServer();
+        $schedule->command('model-relay:maintain')->everyTenMinutes()->onOneServer()->withoutOverlapping(10);
+        $schedule->command('model-relay:quality')->everyMinute()->onOneServer()->withoutOverlapping(15)->runInBackground();
+        $schedule->command('machine:aggregate-metrics --hours=2')
+            ->hourlyAt(5)
+            ->onOneServer()
+            ->withoutOverlapping(30);
+        $schedule->command('machine:prune-metrics --minute-days=7 --hour-days=30 --batch=5000')
+            ->dailyAt('03:15')
+            ->onOneServer()
+            ->withoutOverlapping(30);
+        $schedule->command('traffic:prune-statistics --minute-days=31 --hour-days=366 --daily-days=1095 --batch=5000')
+            ->dailyAt('04:10')
+            ->onOneServer()
+            ->withoutOverlapping(30);
         // send
         $schedule->command('send:remindMail')->dailyAt('11:30')->onOneServer()->withoutOverlapping(30);
         // horizon metrics
@@ -60,6 +75,8 @@ class Kernel extends ConsoleKernel
                 $backupCommand->dailyAt($backupTime);
             }
         }
+
+        app(PluginManager::class)->registerPluginSchedules($schedule);
     }
 
     /**
@@ -70,6 +87,12 @@ class Kernel extends ConsoleKernel
     protected function commands()
     {
         $this->load(__DIR__ . '/Commands');
+
+        try {
+            app(PluginManager::class)->initializeEnabledPlugins();
+        } catch (\Throwable $exception) {
+            // 数据库尚未安装或暂不可用时，基础 Artisan 命令仍应可以启动。
+        }
 
         require base_path('routes/console.php');
     }

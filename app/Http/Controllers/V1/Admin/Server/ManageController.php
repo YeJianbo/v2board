@@ -15,6 +15,7 @@ use App\Models\Machine;
 use App\Models\User;
 use App\Protocols\Singbox\Singbox;
 use App\Services\ServerService;
+use App\Services\ServerMetadataService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -44,9 +45,80 @@ class ManageController extends Controller
     public function getNodes(Request $request)
     {
         $serverService = new ServerService();
+        $servers = $this->decorateRuntimeHealth($serverService->getAllServers());
         return response([
-            'data' => $serverService->getAllServers()
+            'data' => app(ServerMetadataService::class)->decorateServers($servers)
         ]);
+    }
+
+    private function decorateRuntimeHealth(array $servers): array
+    {
+        $machineIds = array_values(array_unique(array_filter(array_map(function ($server) {
+            return (int) ($server['machine_id'] ?? 0);
+        }, $servers))));
+        if (!$machineIds) {
+            return $servers;
+        }
+
+        $machines = Machine::query()
+            ->whereIn('id', $machineIds)
+            ->get(['id', 'status'])
+            ->keyBy('id');
+        $cacheKeys = $machines->mapWithKeys(function (Machine $machine) {
+            return [$machine->id => $machine->statusCacheKey()];
+        })->all();
+        $cachedStatuses = $cacheKeys ? $this->probeCache()->many(array_values($cacheKeys)) : [];
+        $healthByMachine = [];
+
+        foreach ($machines as $machineId => $machine) {
+            $status = $cachedStatuses[$cacheKeys[$machineId] ?? ''] ?? $machine->status;
+            if (is_string($status)) {
+                $decoded = json_decode($status, true);
+                $status = json_last_error() === JSON_ERROR_NONE ? $decoded : [];
+            }
+            if (!is_array($status)) {
+                continue;
+            }
+            $reportedAt = (int) ($status['reported_at'] ?? 0);
+            $records = is_array($status['node_health'] ?? null) ? $status['node_health'] : [];
+            $healthByMachine[(int) $machineId] = [
+                'fresh' => $reportedAt > 0 && (time() - $reportedAt) < 180,
+                'records' => $records,
+            ];
+        }
+
+        foreach ($servers as &$server) {
+            $machineId = (int) ($server['machine_id'] ?? 0);
+            $machineHealth = $healthByMachine[$machineId] ?? null;
+            if (!$machineHealth || !$machineHealth['fresh']) {
+                continue;
+            }
+            $serverId = (int) ($server['id'] ?? 0);
+            $serverType = strtolower(trim((string) ($server['type'] ?? '')));
+            $protocol = strtolower(trim((string) ($serverType === 'v2node'
+                ? ($server['protocol'] ?? '')
+                : $serverType)));
+            foreach ($machineHealth['records'] as $record) {
+                if (!is_array($record) || (int) ($record['node_id'] ?? 0) !== $serverId) {
+                    continue;
+                }
+                $reportedProtocol = strtolower(trim((string) ($record['protocol'] ?? '')));
+                if ($reportedProtocol !== '' && $reportedProtocol !== $protocol) {
+                    continue;
+                }
+                if ($reportedProtocol === '' && $serverType !== 'v2node') {
+                    continue;
+                }
+                $server['runtime_health'] = (string) ($record['status'] ?? 'unknown');
+                $server['runtime_health_message'] = (string) ($record['message'] ?? '');
+                $server['runtime_health_checked_at'] = (int) ($record['checked_at'] ?? 0);
+                $server['runtime_listen_ok'] = !empty($record['listen_ok']) ? 1 : 0;
+                break;
+            }
+        }
+        unset($server);
+
+        return $servers;
     }
 
     public function sort(Request $request)

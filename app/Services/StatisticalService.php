@@ -9,6 +9,7 @@ use App\Models\StatServer;
 use App\Models\StatUser;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
 class StatisticalService
@@ -18,11 +19,13 @@ class StatisticalService
     protected $statServerKey;
     protected $statUserKey;
     protected $redis;
+    protected $batchService;
 
     public function __construct()
     {
         ini_set('memory_limit', -1);
         $this->redis = Redis::connection();
+        $this->batchService = app(ProcessingBatchService::class);
     }
 
     public function setStartAt($timestamp)
@@ -67,35 +70,6 @@ class StatisticalService
     private function decodeMember(string $member): array
     {
         return array_map(static fn ($part) => str_replace('%7C', '|', $part), explode('|', $member));
-    }
-
-    private function moveZsetForProcessing(string $key): array
-    {
-        if (!$this->redis->exists($key)) {
-            return ['', []];
-        }
-
-        $processingKey = $key . ':processing:' . getmypid() . ':' . bin2hex(random_bytes(4));
-        try {
-            $this->redis->rename($key, $processingKey);
-        } catch (\Throwable $e) {
-            return ['', []];
-        }
-
-        return [$processingKey, $this->redis->zrange($processingKey, 0, -1, true) ?: []];
-    }
-
-    private function restoreProcessingZset(string $sourceKey, string $processingKey): void
-    {
-        if ($processingKey === '' || !$this->redis->exists($processingKey)) {
-            return;
-        }
-
-        $raw = $this->redis->zrange($processingKey, 0, -1, true) ?: [];
-        foreach ($raw as $member => $value) {
-            $this->redis->zincrby($sourceKey, (float) $value, (string) $member);
-        }
-        $this->redis->del($processingKey);
     }
 
     public function generateStatData(): array
@@ -268,62 +242,65 @@ class StatisticalService
     public function flushStatServer(int $recordAt, string $recordType = 'd'): void
     {
         $this->setStartAt($recordAt);
-        [$processingKey, $raw] = $this->moveZsetForProcessing($this->statServerKey);
+        [$batch, $raw] = $this->batchService->move($this->statServerKey, 'zset');
         if (!$raw) {
+            $this->batchService->complete($batch);
             return;
         }
 
         $stats = $this->formatStatServerRows($raw);
         if (!$stats) {
+            $this->batchService->complete($batch);
             return;
         }
 
         try {
-            DB::transaction(function () use ($stats, $recordAt, $recordType) {
-                $now = time();
-                foreach ($stats as $row) {
-                    $this->upsertStatServer($row, $recordAt, $recordType, $now);
-                }
+            DB::transaction(function () use ($stats, $recordAt, $recordType, $batch) {
+                $this->batchService->record($batch['batch_id'], 'stat_server');
+                $this->upsertStatServerBatch($stats, $recordAt, $recordType, time());
             }, 3);
-            $this->redis->del($processingKey);
         } catch (\Throwable $e) {
-            $this->restoreProcessingZset($this->statServerKey, $processingKey);
+            $this->batchService->restore($batch);
             throw $e;
         }
+
+        $this->completeCommittedBatch($batch);
     }
 
     public function flushStatUser(int $recordAt, string $recordType = 'd'): void
     {
         $this->setStartAt($recordAt);
-        [$processingKey, $raw] = $this->moveZsetForProcessing($this->statUserKey);
+        [$batch, $raw] = $this->batchService->move($this->statUserKey, 'zset');
         if (!$raw) {
+            $this->batchService->complete($batch);
             return;
         }
 
         $stats = $this->formatStatUserRows($raw);
         if (!$stats) {
+            $this->batchService->complete($batch);
             return;
         }
 
         try {
-            DB::transaction(function () use ($stats, $recordAt, $recordType) {
-                $now = time();
-                foreach ($stats as $row) {
-                    $this->upsertStatUser($row, $recordAt, $recordType, $now);
-                }
+            DB::transaction(function () use ($stats, $recordAt, $recordType, $batch) {
+                $this->batchService->record($batch['batch_id'], 'stat_user');
+                $this->upsertStatUserBatch($stats, $recordAt, $recordType, time());
             }, 3);
-            $this->redis->del($processingKey);
         } catch (\Throwable $e) {
-            $this->restoreProcessingZset($this->statUserKey, $processingKey);
+            $this->batchService->restore($batch);
             throw $e;
         }
+
+        $this->completeCommittedBatch($batch);
     }
 
     public function flushStatUserServer(string $table, int $recordAt, string $recordType): void
     {
         $key = $this->statUserServerKey($table, $recordAt);
-        [$processingKey, $raw] = $this->moveZsetForProcessing($key);
+        [$batch, $raw] = $this->batchService->move($key, 'zset');
         if (!$raw) {
+            $this->batchService->complete($batch);
             return;
         }
 
@@ -346,21 +323,32 @@ class StatisticalService
         }
 
         if (!$stats) {
-            $this->redis->del($processingKey);
+            $this->batchService->complete($batch);
             return;
         }
 
         try {
-            DB::transaction(function () use ($table, $recordAt, $recordType, $stats) {
-                $now = time();
-                foreach ($stats as $row) {
-                    $this->upsertStatUserServer($table, $row, $recordAt, $recordType, $now);
-                }
+            DB::transaction(function () use ($table, $recordAt, $recordType, $stats, $batch) {
+                $this->batchService->record($batch['batch_id'], $table);
+                $this->upsertStatUserServerBatch($table, array_values($stats), $recordAt, $recordType, time());
             }, 3);
-            $this->redis->del($processingKey);
         } catch (\Throwable $e) {
-            $this->restoreProcessingZset($key, $processingKey);
+            $this->batchService->restore($batch);
             throw $e;
+        }
+
+        $this->completeCommittedBatch($batch);
+    }
+
+    private function completeCommittedBatch(?array $batch): void
+    {
+        try {
+            $this->batchService->complete($batch);
+        } catch (\Throwable $e) {
+            Log::warning('统计批次已入账但 Redis 清理失败，等待下次恢复清理', [
+                'batch_id' => $batch['batch_id'] ?? null,
+                'exception' => $e,
+            ]);
         }
     }
 
@@ -407,87 +395,124 @@ class StatisticalService
         return array_values($stats);
     }
 
-    private function upsertStatServer(array $row, int $recordAt, string $recordType, int $now): void
+    private function upsertStatServerBatch(array $stats, int $recordAt, string $recordType, int $now): void
     {
-        if ((float) $row['u'] <= 0 && (float) $row['d'] <= 0) {
-            return;
-        }
-
-        DB::statement(
-            "INSERT INTO v2_stat_server
-                (server_id, server_type, u, d, record_type, record_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                u = u + VALUES(u),
-                d = d + VALUES(d),
-                updated_at = VALUES(updated_at)",
-            [
-                (int) $row['server_id'],
-                (string) $row['server_type'],
-                (int) $row['u'],
-                (int) $row['d'],
+        $rows = [];
+        foreach ($stats as $row) {
+            if ((float)$row['u'] <= 0 && (float)$row['d'] <= 0) {
+                continue;
+            }
+            $rows[] = [
+                (int)$row['server_id'],
+                (string)$row['server_type'],
+                (int)$row['u'],
+                (int)$row['d'],
                 $recordType,
                 $recordAt,
                 $now,
                 $now,
-            ]
+            ];
+        }
+
+        $this->incrementUpsert(
+            'v2_stat_server',
+            ['server_id', 'server_type', 'u', 'd', 'record_type', 'record_at', 'created_at', 'updated_at'],
+            $rows
         );
     }
 
-    private function upsertStatUser(array $row, int $recordAt, string $recordType, int $now): void
+    private function upsertStatUserBatch(array $stats, int $recordAt, string $recordType, int $now): void
     {
-        if ((float) $row['u'] <= 0 && (float) $row['d'] <= 0) {
-            return;
-        }
-
-        DB::statement(
-            "INSERT INTO v2_stat_user
-                (user_id, server_rate, u, d, record_type, record_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                u = u + VALUES(u),
-                d = d + VALUES(d),
-                updated_at = VALUES(updated_at)",
-            [
-                (int) $row['user_id'],
-                (string) $row['server_rate'],
-                (int) $row['u'],
-                (int) $row['d'],
+        $rows = [];
+        foreach ($stats as $row) {
+            if ((float)$row['u'] <= 0 && (float)$row['d'] <= 0) {
+                continue;
+            }
+            $rows[] = [
+                (int)$row['user_id'],
+                (string)$row['server_rate'],
+                (int)$row['u'],
+                (int)$row['d'],
                 $recordType,
                 $recordAt,
                 $now,
                 $now,
-            ]
+            ];
+        }
+
+        $this->incrementUpsert(
+            'v2_stat_user',
+            ['user_id', 'server_rate', 'u', 'd', 'record_type', 'record_at', 'created_at', 'updated_at'],
+            $rows
         );
     }
 
-    private function upsertStatUserServer(string $table, array $row, int $recordAt, string $recordType, int $now): void
+    private function upsertStatUserServerBatch(
+        string $table,
+        array $stats,
+        int $recordAt,
+        string $recordType,
+        int $now
+    ): void
     {
-        if ((float) $row['u'] <= 0 && (float) $row['d'] <= 0) {
-            return;
+        $allowedTables = [
+            'v2_stat_user_server',
+            'v2_stat_user_server_hour',
+            'v2_stat_user_server_minute',
+        ];
+        if (!in_array($table, $allowedTables, true)) {
+            throw new \InvalidArgumentException('Unsupported statistics table');
         }
 
-        DB::statement(
-            "INSERT INTO {$table}
-                (user_id, server_id, server_type, server_rate, u, d, record_type, record_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                u = u + VALUES(u),
-                d = d + VALUES(d),
-                updated_at = VALUES(updated_at)",
-            [
-                (int) $row['user_id'],
-                (int) $row['server_id'],
-                (string) $row['server_type'],
-                (string) $row['server_rate'],
-                (int) $row['u'],
-                (int) $row['d'],
+        $rows = [];
+        foreach ($stats as $row) {
+            if ((float)$row['u'] <= 0 && (float)$row['d'] <= 0) {
+                continue;
+            }
+            $rows[] = [
+                (int)$row['user_id'],
+                (int)$row['server_id'],
+                (string)$row['server_type'],
+                (string)$row['server_rate'],
+                (int)$row['u'],
+                (int)$row['d'],
                 $recordType,
                 $recordAt,
                 $now,
                 $now,
-            ]
+            ];
+        }
+
+        $this->incrementUpsert(
+            $table,
+            ['user_id', 'server_id', 'server_type', 'server_rate', 'u', 'd', 'record_type', 'record_at', 'created_at', 'updated_at'],
+            $rows
         );
+    }
+
+    private function incrementUpsert(string $table, array $columns, array $rows): void
+    {
+        if (!$rows) {
+            return;
+        }
+
+        $quotedColumns = implode(', ', array_map(static fn ($column) => "`{$column}`", $columns));
+        $rowPlaceholder = '(' . implode(', ', array_fill(0, count($columns), '?')) . ')';
+        foreach (array_chunk($rows, 500) as $chunk) {
+            $bindings = [];
+            foreach ($chunk as $row) {
+                array_push($bindings, ...$row);
+            }
+            $values = implode(', ', array_fill(0, count($chunk), $rowPlaceholder));
+            DB::statement(
+                "INSERT INTO `{$table}` ({$quotedColumns}) VALUES {$values}
+                 ON DUPLICATE KEY UPDATE
+                    `u` = `u` + VALUES(`u`),
+                    `d` = `d` + VALUES(`d`),
+                    `updated_at` = VALUES(`updated_at`)",
+                $bindings
+            );
+        }
     }
 
     public function getStatRecord($type)
@@ -523,6 +548,13 @@ class StatisticalService
 
     public function getRanking($type, $limit = 20)
     {
+        if (!$this->startAt) {
+            $this->setStartAt(strtotime(date('Y-m-d', strtotime('-30 days'))));
+        }
+        if (!$this->endAt) {
+            $this->setEndAt(strtotime('+1 day', strtotime(date('Y-m-d'))));
+        }
+
         switch ($type) {
             case 'server_traffic_rank':
                 return $this->buildServerTrafficRank($limit);

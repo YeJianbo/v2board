@@ -2,6 +2,7 @@
 
 namespace App\Protocols;
 
+use App\Models\SubscribeTemplate;
 use App\Utils\Helper;
 
 class Surfboard
@@ -64,13 +65,7 @@ class Surfboard
             }
         }
 
-        $defaultConfig = base_path() . '/resources/rules/default.surfboard.conf';
-        $customConfig = base_path() . '/resources/rules/custom.surfboard.conf';
-        if (\File::exists($customConfig)) {
-            $config = file_get_contents("$customConfig");
-        } else {
-            $config = file_get_contents("$defaultConfig");
-        }
+        $config = SubscribeTemplate::getContent('surfboard');
 
         // Subscription link
         $subsURL = Helper::getSubscribeUrl($user['token']);

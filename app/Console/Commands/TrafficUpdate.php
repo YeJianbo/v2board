@@ -3,9 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Services\StatisticalService;
+use App\Services\ProcessingBatchService;
 use App\Services\TelegramNotificationService;
 use Illuminate\Console\Command;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 
@@ -42,63 +44,94 @@ class TrafficUpdate extends Command
      */
     public function handle()
     {
-        ini_set('memory_limit', -1);
+        $lock = Cache::lock('traffic:update:command', 600);
+        if (!$lock->get()) {
+            return 0;
+        }
+
+        try {
+            $this->handleLocked();
+        } finally {
+            $lock->release();
+        }
+
+        return 0;
+    }
+
+    private function handleLocked(): void
+    {
         if (Redis::exists('traffic_reset_lock')) {
             return;
         }
 
+        $batchService = app(ProcessingBatchService::class);
+        $batchService->recover();
         $this->flushStatCaches();
 
-        $uploads = Redis::hgetall('v2board_upload_traffic');
-        Redis::del('v2board_upload_traffic');
-        $downloads = Redis::hgetall('v2board_download_traffic');
-        Redis::del('v2board_download_traffic');
+        $batchId = bin2hex(random_bytes(16));
+        [$uploadBatch, $uploads] = $batchService->move('v2board_upload_traffic', 'hash', $batchId);
+        [$downloadBatch, $downloads] = $batchService->move('v2board_download_traffic', 'hash', $batchId);
         if (empty($uploads) && empty($downloads)) {
+            $batchService->complete($uploadBatch);
+            $batchService->complete($downloadBatch);
             return;
         }
 
-        $userIds = array_values(array_unique(array_merge(array_keys($uploads), array_keys($downloads))));
-        $users = User::whereIn('id', $userIds)->get([
-            'id',
-            'u',
-            'd',
-            'transfer_enable',
-            'expired_at',
-            'remind_traffic',
-            'telegram_id',
-        ]);
-        $time = time();
-        $casesU = [];
-        $casesD = [];
-        $idList = [];
-
-        foreach ($users as $user) {
-            $upload = $uploads[$user->id] ?? 0;
-            $download = $downloads[$user->id] ?? 0;
-
-            $user->u = (int) $user->u + (int) $upload;
-            $user->d = (int) $user->d + (int) $download;
-            $casesU[] = "WHEN {$user->id} THEN " . $user->u;
-            $casesD[] = "WHEN {$user->id} THEN " . $user->d;
-            $idList[] = $user->id;
-        }
-
-        if (!$idList) {
-            return;
-        }
-
-        $idListStr = implode(',', $idList);
-        $casesUStr = implode(' ', $casesU);
-        $casesDStr = implode(' ', $casesD);
-        $sql = "UPDATE v2_user SET u = CASE id {$casesUStr} END, d = CASE id {$casesDStr} END, t = {$time}, updated_at = {$time} WHERE id IN ({$idListStr})";
         try {
-            DB::beginTransaction();
-            DB::statement($sql);
-            DB::commit();
-        } catch (\Exception $e) {
-            DB::rollBack();
+            $userIds = array_values(array_unique(array_merge(array_keys($uploads), array_keys($downloads))));
+            $users = User::whereIn('id', $userIds)->get([
+                'id',
+                'u',
+                'd',
+                'transfer_enable',
+                'expired_at',
+                'remind_traffic',
+                'telegram_id',
+            ]);
+            $time = time();
+            $casesU = [];
+            $casesD = [];
+            $idList = [];
+
+            foreach ($users as $user) {
+                $upload = (int) ($uploads[$user->id] ?? 0);
+                $download = (int) ($downloads[$user->id] ?? 0);
+
+                $user->u = (int) $user->u + $upload;
+                $user->d = (int) $user->d + $download;
+                $casesU[] = "WHEN {$user->id} THEN {$upload}";
+                $casesD[] = "WHEN {$user->id} THEN {$download}";
+                $idList[] = (int) $user->id;
+            }
+
+            if (!$idList) {
+                $batchService->complete($uploadBatch);
+                $batchService->complete($downloadBatch);
+                return;
+            }
+
+            $idListStr = implode(',', $idList);
+            $casesUStr = implode(' ', $casesU);
+            $casesDStr = implode(' ', $casesD);
+            $sql = "UPDATE v2_user SET u = u + CASE id {$casesUStr} ELSE 0 END, d = d + CASE id {$casesDStr} ELSE 0 END, t = {$time}, updated_at = {$time} WHERE id IN ({$idListStr})";
+
+            DB::transaction(function () use ($sql, $batchService, $batchId) {
+                $batchService->record($batchId, 'user_traffic');
+                DB::statement($sql);
+            }, 3);
+        } catch (\Throwable $e) {
+            $batchService->restore($uploadBatch);
+            $batchService->restore($downloadBatch);
             \Log::error('流量更新失败: ' . $e->getMessage());
             return;
+        }
+
+        try {
+            $batchService->complete($uploadBatch);
+            $batchService->complete($downloadBatch);
+        } catch (\Throwable $e) {
+            // Database changes are committed; restoring here would count the same traffic twice.
+            \Log::warning('流量处理缓存清理失败: ' . $e->getMessage());
         }
 
         $notificationService = app(TelegramNotificationService::class);

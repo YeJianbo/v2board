@@ -1,7 +1,9 @@
 <?php
 namespace App\Protocols\Singbox;
 
+use App\Models\SubscribeTemplate;
 use App\Utils\Helper;
+use App\Support\RavelSubscription;
 
 class Singbox
 {
@@ -10,12 +12,14 @@ class Singbox
     private $user;
     private $config;
     private $supportsCertificatePublicKeySha256 = false;
+    private $supportsRavelSchemaV1 = false;
 
     public function __construct($user, $servers, array $options = null)
     {
         $this->user = $user;
         $this->servers = $servers;
         $this->supportsCertificatePublicKeySha256 = (bool) ($options['supports_certificate_public_key_sha256'] ?? false);
+        $this->supportsRavelSchemaV1 = (bool) ($options['supports_ravel_schema_v1'] ?? false);
     }
 
     private function appendCertificatePublicKeySha256(array $tlsConfig, array $tlsSettings = []): array
@@ -39,21 +43,21 @@ class Singbox
         $this->config['outbounds'] = $outbounds;
         $user = $this->user;
 
-        return response(json_encode($this->config, JSON_UNESCAPED_SLASHES), 200)
+        $response = response(json_encode($this->config, JSON_UNESCAPED_SLASHES), 200)
             ->header('Content-Type', 'application/json')
             ->header('subscription-userinfo', "upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}")
             ->header('profile-update-interval', '24')
             ->header('Profile-Title', 'base64:' . base64_encode($appName))
             ->header('Content-Disposition', 'attachment; filename="' . $appName . '"');
+        if ($this->supportsRavelSchemaV1) {
+            $response->header('Cache-Control', 'private, no-store');
+        }
+        return $response;
     }
 
     protected function loadConfig()
     {
-        $defaultConfig = base_path('resources/rules/default.sing-box.json');
-        $customConfig = base_path('resources/rules/custom.sing-box.json');
-        $jsonData = file_exists($customConfig) ? file_get_contents($customConfig) : file_get_contents($defaultConfig);
-
-        return json_decode($jsonData, true);
+        return SubscribeTemplate::parseJson('singbox');
     }
 
     protected function buildProxies()
@@ -96,6 +100,15 @@ class Singbox
                 case 'hysteria2':
                     $hysteria2Config = $this->buildHysteria2($this->user['uuid'], $item);
                     $proxies[] = $hysteria2Config;
+                    break;
+                case 'ravel':
+                    if (!$this->supportsRavelSchemaV1) {
+                        break;
+                    }
+                    $ravelConfig = RavelSubscription::singbox($item);
+                    if ($ravelConfig) {
+                        $proxies[] = $ravelConfig;
+                    }
                     break;
             }
         }

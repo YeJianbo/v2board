@@ -1,0 +1,28 @@
+{
+    "name": "业务事件审计",
+    "code": "event_audit",
+    "type": "feature",
+    "version": "1.0.0",
+    "description": "把注册、登录和后台用户变更写入 Laravel 日志，验证并提供可用的业务钩子扩展能力。",
+    "author": "BunCloud",
+    "config": {
+        "log_registration": {
+            "type": "boolean",
+            "default": true,
+            "label": "记录用户注册",
+            "description": "记录用户 ID，不记录密码、Token 或订阅地址"
+        },
+        "log_login": {
+            "type": "boolean",
+            "default": true,
+            "label": "记录用户登录",
+            "description": "记录用户 ID 和请求 IP"
+        },
+        "log_admin_changes": {
+            "type": "boolean",
+            "default": true,
+            "label": "记录后台用户变更",
+            "description": "记录目标用户 ID 和变更字段名，不记录字段值"
+        }
+    }
+}

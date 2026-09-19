@@ -11,6 +11,8 @@ payload:
   - DOMAIN-SUFFIX,blogger.com
   - DOMAIN-SUFFIX,waze.com
   - DOMAIN-SUFFIX,gmail.com
+  - DOMAIN-SUFFIX,xn--ngstr-lra8j.com
+  - DOMAIN-SUFFIX,services.googleapis.cn
   - DOMAIN-KEYWORD,google
   - DOMAIN-KEYWORD,businessmessages
   - DOMAIN-KEYWORD,chrome

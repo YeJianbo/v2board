@@ -1,4 +1,10 @@
 payload:
+  - PROCESS-NAME,AweSun.exe
+  - PROCESS-NAME,Weixin.exe
+  - PROCESS-NAME,WeChatAppEx.exe
+  - PROCESS-NAME,WeChat.exe
+  - PROCESS-NAME,Steam.exe
+  - PROCESS-NAME,QQ.exe
   - PROCESS-NAME,com.tencent.mm
   - PROCESS-NAME,com.tencent.mobileqq
   - PROCESS-NAME,com.unionpay

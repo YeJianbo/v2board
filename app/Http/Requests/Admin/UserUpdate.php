@@ -18,7 +18,7 @@ class UserUpdate extends FormRequest
             'id' => 'required|integer',
             'email' => 'email:strict',
             'password' => 'nullable|min:8',
-            'transfer_enable' => 'numeric',
+            'transfer_enable' => 'integer|min:0|max:9223372036854775807',
             'expired_at' => 'nullable|integer',
             'banned' => 'bool',
             'plan_id' => 'nullable|integer',
@@ -26,14 +26,15 @@ class UserUpdate extends FormRequest
             'discount' => 'nullable|integer|min:0|max:100',
             'is_admin' => 'boolean',
             'is_staff' => 'boolean',
-            'u' => 'integer',
-            'd' => 'integer',
+            'u' => 'integer|min:0|max:9223372036854775807',
+            'd' => 'integer|min:0|max:9223372036854775807',
             'balance' => 'numeric',
             'commission_type' => 'integer',
             'commission_balance' => 'numeric',
             'remarks' => 'nullable',
             'speed_limit' => 'nullable|integer',
-            'device_limit' => 'nullable|integer'
+            'device_limit' => 'nullable|integer',
+            'invite_user_email' => 'nullable|email:strict'
         ];
 
         return HookManager::filter('admin.user.update.rules', $rules, $this);
@@ -44,7 +45,13 @@ class UserUpdate extends FormRequest
         $messages = [
             'email.required' => '邮箱不能为空',
             'email.email' => '邮箱格式不正确',
-            'transfer_enable.numeric' => '流量格式不正确',
+            'transfer_enable.integer' => '流量额度必须为有效的整数字节数，不能超出存储上限',
+            'transfer_enable.min' => '流量额度不能小于0',
+            'transfer_enable.max' => '流量额度超出存储上限，请检查输入单位',
+            'u.min' => '已用上行不能小于0',
+            'u.max' => '已用上行超出存储上限',
+            'd.min' => '已用下行不能小于0',
+            'd.max' => '已用下行超出存储上限',
             'expired_at.integer' => '到期时间格式不正确',
             'banned.in' => '是否封禁格式不正确',
             'is_admin.required' => '是否管理员不能为空',

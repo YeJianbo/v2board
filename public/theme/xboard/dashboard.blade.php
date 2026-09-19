@@ -11,6 +11,7 @@
 <body>
 
   <script>
+    // This theme uses routerBase for API requests; hash routes keep the hidden entry URL.
     window.routerBase = "/";
     window.settings = {
       title: '{{$title}}',
@@ -34,6 +35,8 @@
     }
   </script>
   <div id="app"></div>
+  <link rel="stylesheet" href="/theme/xboard/assets/machine-monitor.css?v=20260918-2">
+  <script src="/theme/xboard/assets/machine-monitor.js?v=20260918-2"></script>
   <style>
     html.bc-user-polish {
       --bc-bg: #f2f2f2;
@@ -1607,6 +1610,7 @@
       }
 
       function handleMutation() {
+        if (window.bunCloudMachineMonitor) window.bunCloudMachineMonitor(getAuthHeaders)
         updateTrafficRouteClass()
         schedulePatch()
         scheduleSubscribePatch()
@@ -1622,6 +1626,7 @@
       setTimeout(handleMutation, 800)
       setTimeout(handleMutation, 2000)
       setInterval(function () {
+        if (window.bunCloudMachineMonitor) window.bunCloudMachineMonitor(getAuthHeaders)
         if (!isTrafficRoute()) removeNodeTrafficInlineControls()
         scheduleSubscribePatch()
         scheduleDocsPatch()

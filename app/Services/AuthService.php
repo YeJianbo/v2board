@@ -12,6 +12,9 @@ use Illuminate\Http\Request;
 
 class AuthService
 {
+    private const DEFAULT_SESSION_TTL = 2592000;
+    private const AUTH_CACHE_TTL = 300;
+
     private $user;
 
     public function __construct(User $user)
@@ -22,13 +25,18 @@ class AuthService
     public function generateAuthData(Request $request)
     {
         $guid = Helper::guid();
+        $issuedAt = time();
+        $expiresAt = $issuedAt + self::sessionTtl();
         $authData = JWT::encode([
             'id' => $this->user->id,
             'session' => $guid,
+            'iat' => $issuedAt,
+            'exp' => $expiresAt,
         ], config('app.key'), 'HS256');
         self::addSession($this->user->id, $guid, [
             'ip' => $request->ip(),
-            'login_at' => time(),
+            'login_at' => $issuedAt,
+            'expires_at' => $expiresAt,
             'ua' => $request->userAgent(),
             'auth_data' => $authData
         ]);
@@ -42,30 +50,84 @@ class AuthService
     public static function decryptAuthData($jwt)
     {
         try {
+            if (!is_string($jwt) || $jwt === '') {
+                return false;
+            }
+
+            $data = (array)JWT::decode($jwt, new Key(config('app.key'), 'HS256'));
+            if (empty($data['id']) || empty($data['session'])) {
+                return false;
+            }
+            if (!self::checkSession((int) $data['id'], (string) $data['session'])) {
+                Cache::forget($jwt);
+                return false;
+            }
+
             if (!Cache::has($jwt)) {
-                $data = (array)JWT::decode($jwt, new Key(config('app.key'), 'HS256'));
-                if (!self::checkSession($data['id'], $data['session'])) return false;
                 $user = User::select([
                     'id',
                     'email',
                     'is_admin',
-                    'is_staff'
+                    'is_staff',
+                    'banned',
                 ])
                     ->find($data['id']);
-                if (!$user) return false;
-                Cache::put($jwt, $user->toArray(), 3600);
+                if (!$user || (int) $user->banned === 1) {
+                    Cache::forget($jwt);
+                    return false;
+                }
+                Cache::put($jwt, $user->toArray(), self::AUTH_CACHE_TTL);
             }
-            return Cache::get($jwt);
-        } catch (\Exception $e) {
+
+            $user = Cache::get($jwt);
+            if (!is_array($user) || (int) ($user['banned'] ?? 0) === 1) {
+                Cache::forget($jwt);
+                return false;
+            }
+            unset($user['banned']);
+            return $user;
+        } catch (\Throwable $e) {
             return false;
         }
     }
 
     private static function checkSession($userId, $session)
     {
-        $sessions = (array)Cache::get(CacheKey::get("USER_SESSIONS", $userId)) ?? [];
-        if (!in_array($session, array_keys($sessions))) return false;
-        return true;
+        $cacheKey = CacheKey::get("USER_SESSIONS", $userId);
+        $sessions = (array)Cache::get($cacheKey, []);
+        if (!isset($sessions[$session]) || !is_array($sessions[$session])) {
+            return false;
+        }
+
+        $now = time();
+        $changed = false;
+        foreach ($sessions as $guid => $meta) {
+            if (!is_array($meta)) {
+                unset($sessions[$guid]);
+                $changed = true;
+                continue;
+            }
+
+            $expiresAt = (int)($meta['expires_at'] ?? 0);
+            if ($expiresAt <= 0) {
+                $expiresAt = (int)($meta['login_at'] ?? $now) + self::sessionTtl();
+                $sessions[$guid]['expires_at'] = $expiresAt;
+                $changed = true;
+            }
+            if ($expiresAt <= $now) {
+                if (!empty($meta['auth_data'])) {
+                    Cache::forget($meta['auth_data']);
+                }
+                unset($sessions[$guid]);
+                $changed = true;
+            }
+        }
+
+        if ($changed) {
+            self::storeSessions($cacheKey, $sessions);
+        }
+
+        return isset($sessions[$session]);
     }
 
     private static function addSession($userId, $guid, $meta)
@@ -73,11 +135,7 @@ class AuthService
         $cacheKey = CacheKey::get("USER_SESSIONS", $userId);
         $sessions = (array)Cache::get($cacheKey, []);
         $sessions[$guid] = $meta;
-        if (!Cache::put(
-            $cacheKey,
-            $sessions
-        )) return false;
-        return true;
+        return self::storeSessions($cacheKey, $sessions);
     }
 
     public function getSessions()
@@ -89,12 +147,11 @@ class AuthService
     {
         $cacheKey = CacheKey::get("USER_SESSIONS", $this->user->id);
         $sessions = (array)Cache::get($cacheKey, []);
+        if (!empty($sessions[$sessionId]['auth_data'])) {
+            Cache::forget($sessions[$sessionId]['auth_data']);
+        }
         unset($sessions[$sessionId]);
-        if (!Cache::put(
-            $cacheKey,
-            $sessions
-        )) return false;
-        return true;
+        return self::storeSessions($cacheKey, $sessions);
     }
 
     public function removeAllSession()
@@ -107,5 +164,33 @@ class AuthService
             }
         }
         return Cache::forget($cacheKey);
+    }
+
+    public function removeAllSessions()
+    {
+        return $this->removeAllSession();
+    }
+
+    private static function sessionTtl(): int
+    {
+        return max(3600, (int)config('v2board.auth_session_ttl', self::DEFAULT_SESSION_TTL));
+    }
+
+    private static function storeSessions(string $cacheKey, array $sessions): bool
+    {
+        if (!$sessions) {
+            Cache::forget($cacheKey);
+            return true;
+        }
+
+        $now = time();
+        $maxExpiresAt = $now;
+        foreach ($sessions as $meta) {
+            if (is_array($meta) && !empty($meta['expires_at'])) {
+                $maxExpiresAt = max($maxExpiresAt, (int)$meta['expires_at']);
+            }
+        }
+
+        return Cache::put($cacheKey, $sessions, max(1, $maxExpiresAt - $now));
     }
 }

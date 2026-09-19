@@ -49,10 +49,13 @@ Configure **System settings -> Backup and migration** in the admin panel.
   Nginx/Supervisor/Cron configuration, referenced BT cron scripts, and the
   restore script. Portable root cron entries are restored without duplicating
   Laravel Scheduler; BT-only jobs are restored only on a BT target.
-- Remote storage uses rclone. Google Drive, FTP, FTPS and SFTP therefore share
-  the same reliable upload and retention implementation.
+- Google Drive can be authorized directly in the admin panel. It uses a
+  dedicated config at `storage/app/backup/rclone-panel.conf` and never reads or
+  overwrites the operating-system user's existing rclone configuration.
+- Custom rclone destinations remain available for FTP, FTPS, SFTP and existing
+  remotes, preserving the previous upload and retention behavior.
 
-Configure a remote once on the panel server:
+For a custom rclone destination, configure a remote once on the panel server:
 
 ```bash
 rclone config
@@ -62,6 +65,12 @@ rclone lsd gdrive:
 Then enter a destination such as `gdrive:buncloud-backups` or
 `ftp:buncloud-backups` in the panel. Leaving it empty keeps backups locally in
 `storage/app/backups`.
+
+For the isolated Google Drive integration, enable Google Drive API in Google
+Cloud, create an OAuth 2.0 Web application, add the callback URL displayed by
+the panel, and finish authorization from **System settings -> Backup and
+migration**. The requested `drive.file` scope only manages files created by
+this panel integration.
 
 Manual verification:
 

@@ -10,6 +10,7 @@ class TuicController extends Controller
 {
     public function save(Request $request)
     {
+        $metadata = $this->validateServerMetadata($request);
         $params = $request->validate([
             'show' => '',
             'name' => 'required',
@@ -36,6 +37,7 @@ class TuicController extends Controller
             }
             try {
                 $server->update($params);
+                $this->saveServerMetadata('tuic', (int) $server->id, $metadata);
             } catch (\Exception $e) {
                 abort(500, '保存失败');
             }
@@ -44,9 +46,11 @@ class TuicController extends Controller
             ]);
         }
 
-        if (!ServerTuic::create($params)) {
+        $server = ServerTuic::create($params);
+        if (!$server) {
             abort(500, '创建失败');
         }
+        $this->saveServerMetadata('tuic', (int) $server->id, $metadata);
 
         return response([
             'data' => true
@@ -61,9 +65,11 @@ class TuicController extends Controller
                 abort(500, '节点ID不存在');
             }
         }
-        return response([
-            'data' => $server->delete()
-        ]);
+        $deleted = $server->delete();
+        if ($deleted) {
+            $this->deleteServerMetadata('tuic', (int) $server->id);
+        }
+        return response(['data' => $deleted]);
     }
 
     public function update(Request $request)
@@ -96,13 +102,15 @@ class TuicController extends Controller
     public function copy(Request $request)
     {
         $server = ServerTuic::find($request->input('id'));
-        $server->show = 0;
         if (!$server) {
             abort(500, '服务器不存在');
         }
-        if (!ServerTuic::create($server->toArray())) {
+        $server->show = 0;
+        $copiedServer = ServerTuic::create($server->toArray());
+        if (!$copiedServer) {
             abort(500, '复制失败');
         }
+        $this->copyServerMetadata('tuic', (int) $server->id, (int) $copiedServer->id);
 
         return response([
             'data' => true

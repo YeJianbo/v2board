@@ -6,7 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Protocols\General;
 use App\Protocols\Singbox\Singbox;
 use App\Protocols\Singbox\SingboxOld;
-use App\Protocols\ClashMeta;
+use App\Services\ClientProtocolResolver;
+use App\Protocols\Ravel;
 use App\Services\ServerService;
 use App\Services\UserService;
 use App\Utils\Helper;
@@ -24,33 +25,33 @@ class ClientController extends Controller
         $userService = new UserService();
         if ($userService->isAvailable($user)) {
             $serverService = new ServerService();
-            $servers = $serverService->getAvailableServers($user);
+            $servers = $serverService->getAvailableServers($user, false);
             $servers = $this->filterServersByRequest($servers, $request);
-            if($flag) {
-                if (!strpos($flag, 'sing')) {
+            if ((string) $request->input('format') === 'ravel-json-v1' || strpos($flag, 'ravel-json-v1') !== false) {
+                return (new Ravel($user, $servers))->handle();
+            }
+            if ($flag) {
+                $resolver = app(ClientProtocolResolver::class);
+                if (!$resolver->isSingbox($flag)) {
                     $this->setSubscribeInfoToServers($servers, $user);
-                    foreach (array_reverse(glob(app_path('Protocols') . '/*.php')) as $file) {
-                        $file = 'App\\Protocols\\' . basename($file, '.php');
-                        $class = new $file($user, $servers);
-                        if (strpos($flag, $class->flag) !== false) {
-                            return $class->handle();
-                        }
+                    $protocolClass = $resolver->resolve($flag);
+                    if ($protocolClass !== null) {
+                        return (new $protocolClass($user, $servers))->handle();
                     }
                 }
                 $isNekoBox = strpos($flag, 'neko') !== false || strpos($flag, 'nb4a') !== false;
-                if (strpos($flag, 'sing') !== false || $isNekoBox) {
-                    $version = null;
+                if ($resolver->isSingbox($flag)) {
+                    $supportsRavelSchemaV1 = $this->supportsRavelSchemaV1($request, $flag);
+                    $version = $resolver->singboxVersion($flag);
                     $isBunCloudPinnedNekoBox = $isNekoBox && (
                         strpos($flag, 'buncloudpin') !== false ||
                         strpos($flag, 'buncloud-pin') !== false ||
                         strpos($flag, 'cert-pin') !== false
                     );
-                    if (preg_match('/sing-box\s+([0-9.]+)/i', $flag, $matches)) {
-                        $version = $matches[1];
-                    }
-                    if ($isNekoBox || (!is_null($version) && $version >= '1.12.0')) {
+                    if ($supportsRavelSchemaV1 || $isNekoBox || ($version !== null && version_compare($version, '1.12.0', '>='))) {
                         $class = new Singbox($user, $servers, [
                             'supports_certificate_public_key_sha256' => $isBunCloudPinnedNekoBox || (!$isNekoBox && !is_null($version) && version_compare($version, '1.13.0', '>=')),
+                            'supports_ravel_schema_v1' => $supportsRavelSchemaV1,
                         ]);
                     } else {
                         $class = new SingboxOld($user, $servers);
@@ -61,6 +62,27 @@ class ClientController extends Controller
             $class = new General($user, $servers);
             return $class->handle();
         }
+    }
+
+    private function supportsRavelSchemaV1(Request $request, string $flag): bool
+    {
+        if ((string) $request->input('ravel_schema') === '1') {
+            return true;
+        }
+
+        $capabilities = $request->input('capabilities', '');
+        $capabilities = is_array($capabilities)
+            ? implode(',', array_map('strval', $capabilities))
+            : (string) $capabilities;
+        $haystack = strtolower($flag . ' ' . $capabilities);
+
+        foreach (['ravel-schema-v1', 'ravel_schema_v1', 'ravel-schema/1'] as $marker) {
+            if (strpos($haystack, $marker) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function filterServersByRequest(array $servers, Request $request): array

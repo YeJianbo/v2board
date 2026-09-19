@@ -136,7 +136,7 @@ fi
 
 if ((SKIP_PACKAGES == 0)); then
   export DEBIAN_FRONTEND=noninteractive
-  PACKAGES=(ca-certificates cron curl gzip openssl rsync tar unzip)
+  PACKAGES=(ca-certificates cron curl gzip openssl rclone rsync tar unzip)
   if ! command -v mysql >/dev/null 2>&1; then
     PACKAGES+=(mariadb-client mariadb-server)
   fi
@@ -497,6 +497,11 @@ if ((IS_BT_PANEL)) && [[ -f "${NGINX_SITE}" ]]; then
   echo "Preserving existing BT Panel nginx vhost: ${NGINX_SITE}"
 else
   {
+  cat <<'EOF'
+log_format v2board_safe '$remote_addr - $remote_user [$time_local] "$request_method $uri $server_protocol" '
+                        '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
+
+EOF
   cat <<EOF
 server {
     listen 80;
@@ -551,7 +556,7 @@ EOF
         access_log off;
     }
 
-    access_log /var/log/nginx/v2board.access.log;
+    access_log /var/log/nginx/v2board.access.log v2board_safe;
     error_log /var/log/nginx/v2board.error.log;
 }
 EOF

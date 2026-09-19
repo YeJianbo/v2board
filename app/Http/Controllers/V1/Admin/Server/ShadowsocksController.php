@@ -12,6 +12,7 @@ class ShadowsocksController extends Controller
 {
     public function save(ServerShadowsocksSave $request)
     {
+        $metadata = $this->validateServerMetadata($request);
         $params = $request->validated();
         if ($request->input('id')) {
             $server = ServerShadowsocks::find($request->input('id'));
@@ -20,6 +21,7 @@ class ShadowsocksController extends Controller
             }
             try {
                 $server->update($params);
+                $this->saveServerMetadata('shadowsocks', (int) $server->id, $metadata);
             } catch (\Exception $e) {
                 abort(500, '保存失败');
             }
@@ -28,9 +30,11 @@ class ShadowsocksController extends Controller
             ]);
         }
 
-        if (!ServerShadowsocks::create($params)) {
+        $server = ServerShadowsocks::create($params);
+        if (!$server) {
             abort(500, '创建失败');
         }
+        $this->saveServerMetadata('shadowsocks', (int) $server->id, $metadata);
 
         return response([
             'data' => true
@@ -45,9 +49,11 @@ class ShadowsocksController extends Controller
                 abort(500, '节点ID不存在');
             }
         }
-        return response([
-            'data' => $server->delete()
-        ]);
+        $deleted = $server->delete();
+        if ($deleted) {
+            $this->deleteServerMetadata('shadowsocks', (int) $server->id);
+        }
+        return response(['data' => $deleted]);
     }
 
     public function update(ServerShadowsocksUpdate $request)
@@ -75,13 +81,15 @@ class ShadowsocksController extends Controller
     public function copy(Request $request)
     {
         $server = ServerShadowsocks::find($request->input('id'));
-        $server->show = 0;
         if (!$server) {
             abort(500, '服务器不存在');
         }
-        if (!ServerShadowsocks::create($server->toArray())) {
+        $server->show = 0;
+        $copiedServer = ServerShadowsocks::create($server->toArray());
+        if (!$copiedServer) {
             abort(500, '复制失败');
         }
+        $this->copyServerMetadata('shadowsocks', (int) $server->id, (int) $copiedServer->id);
 
         return response([
             'data' => true

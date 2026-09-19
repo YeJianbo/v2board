@@ -31,14 +31,31 @@ class AdminRoute
             $router->post('/server/group/drop', 'V1\\Admin\\Server\\GroupController@drop');
             // Machine
             $router->get ('/machine/fetch', 'V1\\Admin\\MachineController@fetch');
+            $router->get ('/machine/status', 'V1\\Admin\\MachineController@status');
             $router->post('/machine/save', 'V1\\Admin\\MachineController@save');
+            $router->post('/machine/renew', 'V1\\Admin\\MachineController@renew');
+            $router->post('/machine/sort', 'V1\\Admin\\MachineController@sort');
             $router->post('/machine/drop', 'V1\\Admin\\MachineController@drop');
+            $router->get ('/machine/group/fetch', 'V1\\Admin\\MachineGroupController@fetch');
+            $router->post('/machine/group/save', 'V1\\Admin\\MachineGroupController@save');
+            $router->post('/machine/group/drop', 'V1\\Admin\\MachineGroupController@drop');
+            $router->post('/machine/group/sort', 'V1\\Admin\\MachineGroupController@sort');
             $router->post('/machine/token', 'V1\\Admin\\MachineController@token');
             $router->post('/machine/installToken', 'V1\\Admin\\MachineController@installToken');
             $router->post('/machine/createV2node', 'V1\\Admin\\MachineController@createV2node');
             $router->post('/machine/deployCommand', 'V1\\Admin\\MachineController@deployCommand');
             $router->post('/machine/restartV2node', 'V1\\Admin\\MachineController@restartV2node');
+            $router->post('/machine/runtimeTask', 'V1\\Admin\\MachineController@runtimeTask');
+            $router->get ('/machine/runtimeTaskResult', 'V1\\Admin\\MachineController@runtimeTaskResult');
+            $router->post('/machine/runtimeStream/start', 'V1\\Admin\\MachineController@runtimeStreamStart');
+            $router->get ('/machine/runtimeStream/result', 'V1\\Admin\\MachineController@runtimeStreamResult');
+            $router->post('/machine/runtimeStream/stop', 'V1\\Admin\\MachineController@runtimeStreamStop');
+            $router->post('/machine/updateProbe', 'V1\\Admin\\MachineController@updateProbe');
+            $router->get ('/machine/probeReleases', 'V1\\Admin\\MachineController@probeReleases');
+            $router->get ('/machine/probeUpdateHistory', 'V1\\Admin\\MachineController@probeUpdateHistory');
             $router->post('/machine/enableBbr', 'V1\\Admin\\MachineController@enableBbr');
+            $router->get ('/machine/networkQualityHistory', 'V1\\Admin\\MachineController@networkQualityHistory');
+            $router->get ('/machine/resourceHistory', 'V1\\Admin\\MachineController@resourceHistory');
             $router->get ('/server/route/fetch', 'V1\\Admin\\Server\\RouteController@fetch');
             $router->post('/server/route/save', 'V1\\Admin\\Server\\RouteController@save');
             $router->post('/server/route/drop', 'V1\\Admin\\Server\\RouteController@drop');
@@ -143,7 +160,7 @@ class AdminRoute
             // Notice
             $router->get ('/notice/fetch', 'V1\\Admin\\NoticeController@fetch');
             $router->post('/notice/save', 'V1\\Admin\\NoticeController@save');
-            $router->post('/notice/update', 'V1\\Admin\\NoticeController@update');
+            $router->post('/notice/update', 'V1\\Admin\\NoticeController@save');
             $router->post('/notice/drop', 'V1\\Admin\\NoticeController@drop');
             $router->post('/notice/show', 'V1\\Admin\\NoticeController@show');
             // Ticket

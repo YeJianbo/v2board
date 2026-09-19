@@ -11,4 +11,16 @@ payload:
   - DOMAIN-SUFFIX,fb.watch
   - DOMAIN-SUFFIX,fbsbx.com
   - DOMAIN-SUFFIX,fbwat.ch
+  - DOMAIN-SUFFIX,instagram.com
+  - DOMAIN-SUFFIX,cdninstagram.com
+  - DOMAIN-SUFFIX,ig.me
+  - DOMAIN-SUFFIX,messenger.com
+  - DOMAIN-SUFFIX,m.me
+  - DOMAIN-SUFFIX,meta.ai
+  - DOMAIN-SUFFIX,meta.com
+  - DOMAIN-SUFFIX,threads.com
+  - DOMAIN-SUFFIX,threads.net
+  - DOMAIN-SUFFIX,whatsapp.com
+  - DOMAIN-SUFFIX,whatsapp.net
+  - DOMAIN-SUFFIX,wa.me
   - DOMAIN-SUFFIX,parse.com

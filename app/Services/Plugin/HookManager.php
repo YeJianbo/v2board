@@ -4,6 +4,8 @@ namespace App\Services\Plugin;
 
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class HookManager
 {
@@ -115,7 +117,13 @@ class HookManager
 
         foreach ($actions[$hook] as $callbacks) {
             foreach ($callbacks as $callback) {
-                $callback($payload);
+                try {
+                    $callback($payload);
+                } catch (InterceptResponseException $exception) {
+                    throw $exception;
+                } catch (Throwable $exception) {
+                    self::logCallbackFailure($hook, $callback, $exception);
+                }
             }
         }
     }
@@ -141,11 +149,27 @@ class HookManager
         $result = $value;
         foreach ($filters[$hook] as $callbacks) {
             foreach ($callbacks as $callback) {
-                $result = $callback($result, ...$args);
+                try {
+                    $result = $callback($result, ...$args);
+                } catch (InterceptResponseException $exception) {
+                    throw $exception;
+                } catch (Throwable $exception) {
+                    self::logCallbackFailure($hook, $callback, $exception);
+                }
             }
         }
 
         return $result;
+    }
+
+    protected static function logCallbackFailure(string $hook, callable $callback, Throwable $exception): void
+    {
+        Log::error('Plugin hook callback failed', [
+            'hook' => $hook,
+            'callback' => self::getCallableId($callback),
+            'exception' => get_class($exception),
+            'message' => $exception->getMessage(),
+        ]);
     }
 
     /**

@@ -18,13 +18,20 @@ use Laravel\Horizon\WaitTimeCalculator;
 
 class SystemController extends Controller
 {
+    private const DASHBOARD_STATUS_CACHE_SECONDS = 5;
+
     public function getSystemStatus()
     {
-        $data = [
-            'schedule' => $this->getScheduleStatus(),
-            'horizon' => $this->getHorizonStatus(),
-            'schedule_last_runtime' => Cache::get(CacheKey::get('SCHEDULE_LAST_CHECK_AT', null)),
-        ];
+        $data = Cache::remember(
+            'admin:dashboard:system-status:v1',
+            self::DASHBOARD_STATUS_CACHE_SECONDS,
+            fn () => [
+                'schedule' => $this->getScheduleStatus(),
+                'horizon' => $this->getHorizonStatus(),
+                'schedule_last_runtime' => Cache::get(CacheKey::get('SCHEDULE_LAST_CHECK_AT', null)),
+            ]
+        );
+
         return $this->success($data);
     }
 
@@ -64,29 +71,37 @@ class SystemController extends Controller
 
     public function getQueueStats()
     {
-        $data = $this->emptyQueueStats();
+        $data = Cache::remember(
+            'admin:dashboard:queue-stats:v1',
+            self::DASHBOARD_STATUS_CACHE_SECONDS,
+            function () {
+                $stats = $this->emptyQueueStats();
 
-        try {
-            $data = [
-                'failedJobs' => app(JobRepository::class)->countRecentlyFailed(),
-                'jobsPerMinute' => app(MetricsRepository::class)->jobsProcessedPerMinute(),
-                'pausedMasters' => $this->totalPausedMasters(),
-                'periods' => [
-                    'failedJobs' => config('horizon.trim.recent_failed', config('horizon.trim.failed')),
-                    'recentJobs' => config('horizon.trim.recent'),
-                ],
-                'processes' => $this->totalProcessCount(),
-                'queueWithMaxRuntime' => app(MetricsRepository::class)->queueWithMaximumRuntime(),
-                'queueWithMaxThroughput' => app(MetricsRepository::class)->queueWithMaximumThroughput(),
-                'recentJobs' => app(JobRepository::class)->countRecent(),
-                'status' => $this->getHorizonStatus(),
-                'wait' => collect(app(WaitTimeCalculator::class)->calculate())->take(1),
-            ];
-        } catch (\Throwable $e) {
-            $data['status'] = false;
-            $data['unavailable'] = true;
-            $data['message'] = $e->getMessage();
-        }
+                try {
+                    $stats = [
+                        'failedJobs' => app(JobRepository::class)->countRecentlyFailed(),
+                        'jobsPerMinute' => app(MetricsRepository::class)->jobsProcessedPerMinute(),
+                        'pausedMasters' => $this->totalPausedMasters(),
+                        'periods' => [
+                            'failedJobs' => config('horizon.trim.recent_failed', config('horizon.trim.failed')),
+                            'recentJobs' => config('horizon.trim.recent'),
+                        ],
+                        'processes' => $this->totalProcessCount(),
+                        'queueWithMaxRuntime' => app(MetricsRepository::class)->queueWithMaximumRuntime(),
+                        'queueWithMaxThroughput' => app(MetricsRepository::class)->queueWithMaximumThroughput(),
+                        'recentJobs' => app(JobRepository::class)->countRecent(),
+                        'status' => $this->getHorizonStatus(),
+                        'wait' => collect(app(WaitTimeCalculator::class)->calculate())->take(1),
+                    ];
+                } catch (\Throwable $e) {
+                    $stats['status'] = false;
+                    $stats['unavailable'] = true;
+                    $stats['message'] = $e->getMessage();
+                }
+
+                return $stats;
+            }
+        );
 
         return $this->success($data);
     }

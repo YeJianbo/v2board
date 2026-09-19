@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Machine;
 use App\Models\ServerV2node;
 use App\Services\NodeSyncService;
+use App\Support\RavelConfig;
 use Illuminate\Http\Request;
 use ParagonIE_Sodium_Compat as SodiumCompat;
 use App\Utils\Helper;
@@ -34,7 +35,8 @@ class V2nodeController extends Controller
 
     public function save(Request $request)
     {
-        $params = $request->validate([
+        $metadata = $this->validateServerMetadata($request);
+        $params = $request->validate(array_merge([
             'group_id' => 'required',
             'route_id' => 'nullable|array',
             'name' => 'required',
@@ -45,7 +47,7 @@ class V2nodeController extends Controller
             'listen_ip' => 'nullable',
             'port' => 'required',
             'server_port' => 'required',
-            'protocol' => 'required|in:shadowsocks,vmess,vless,trojan,tuic,hysteria2,anytls',
+            'protocol' => 'required|in:shadowsocks,vmess,vless,trojan,tuic,hysteria2,anytls,ravel',
             'tls' => 'required|in:0,1,2',
             'tls_settings' => 'nullable|array',
             'flow' => 'nullable|in:xtls-rprx-vision',
@@ -67,7 +69,19 @@ class V2nodeController extends Controller
             'rate' => 'required',
             'show' => 'nullable|in:0,1',
             'sort' => 'nullable'
-        ]);
+        ], RavelConfig::rules()));
+        if ($params['protocol'] === 'ravel' || array_key_exists('ravel_settings', $params)) {
+            $params['ravel_settings'] = RavelConfig::normalize(
+                (string) $params['protocol'],
+                $params['ravel_settings'] ?? []
+            );
+        }
+        if ($params['protocol'] === 'ravel') {
+            $params['tls'] = 1;
+            $params['network'] = 'tcp';
+            $params['tls_settings']['server_name'] = $params['tls_settings']['server_name']
+                ?? parse_url('https://' . $params['ravel_authority'], PHP_URL_HOST);
+        }
         if ($params['protocol'] == 'anytls' && (int) $params['tls'] === 0) {
             $params['tls'] = 1;
         }
@@ -237,6 +251,7 @@ class V2nodeController extends Controller
             $originalMachineId = (int) ($server->machine_id ?: 0);
             try {
                 $server->update($params);
+                $this->saveServerMetadata('v2node', (int) $server->id, $metadata);
             } catch (\Exception $e) {
                 abort(500, '保存失败');
             }
@@ -255,6 +270,7 @@ class V2nodeController extends Controller
         if (!$server) {
             abort(500, '创建失败');
         }
+        $this->saveServerMetadata('v2node', (int) $server->id, $metadata);
 
         $this->notifyMachineNodesChanged([
             (int) ($server->machine_id ?: 0),
@@ -303,6 +319,9 @@ class V2nodeController extends Controller
         $machineId = (int) ($server->machine_id ?: 0);
         $relayMachineId = (int) ($server->relay_machine_id ?: 0);
         $result = $server->delete();
+        if ($result) {
+            $this->deleteServerMetadata('v2node', (int) $server->id);
+        }
         $this->notifyMachineNodesChanged([$machineId, $relayMachineId]);
         return response([
             'data' => $result
@@ -392,6 +411,7 @@ class V2nodeController extends Controller
         if (!$copiedServer) {
             abort(500, '复制失败');
         }
+        $this->copyServerMetadata('v2node', (int) $server->id, (int) $copiedServer->id);
 
         $this->notifyMachineNodesChanged([
             (int) ($copiedServer->machine_id ?: 0),

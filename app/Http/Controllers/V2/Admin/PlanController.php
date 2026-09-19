@@ -16,6 +16,7 @@ class PlanController extends Controller
     public function fetch(Request $request)
     {
         $plans = Plan::orderBy('sort', 'ASC')
+            ->with('group:id,name')
             ->withCount([
                 'users',
                 'users as active_users_count' => function ($query) {
@@ -86,8 +87,7 @@ class PlanController extends Controller
     {
         $updateData = $request->only([
             'show',
-            'renew',
-            'sell'
+            'renew'
         ]);
 
         $plan = Plan::find($request->input('id'));

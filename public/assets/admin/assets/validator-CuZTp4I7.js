@@ -1,0 +1,1 @@
+import{nr as e}from"./css-DornptoW.js";var t=[`year`,`years`,`month`,`months`,`date`,`dates`,`week`,`datetime`,`datetimerange`,`daterange`,`monthrange`,`yearrange`],n=t=>[``,...e].includes(t);export{t as n,n as t};

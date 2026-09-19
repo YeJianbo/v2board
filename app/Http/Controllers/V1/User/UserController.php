@@ -8,6 +8,7 @@ use App\Http\Requests\User\UserRedeemGiftCard;
 use App\Http\Requests\User\UserTransfer;
 use App\Http\Requests\User\UserUpdate;
 use App\Models\Giftcard;
+use App\Models\GiftcardUsage;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Ticket;
@@ -15,6 +16,7 @@ use App\Models\User;
 use App\Services\AuthService;
 use App\Services\OrderService;
 use App\Services\UserService;
+use App\Services\RavelCredentialService;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -156,48 +158,38 @@ class UserController extends Controller
 
     public function redeemgiftcard(UserRedeemGiftCard $request)
     {
-        DB::beginTransaction();
-
-        try {
-            $user = User::find($request->user['id']);
-            if (!$user) {
-                abort(500, __('The user does not exist'));
-            }
-            $giftcard_input = $request->giftcard;
-            $giftcard = Giftcard::where('code', $giftcard_input)->first();
-
+        $result = DB::transaction(function () use ($request) {
+            $giftcard = Giftcard::where('code', $request->giftcard)->lockForUpdate()->first();
             if (!$giftcard) {
-                abort(500, __('The gift card does not exist'));
+                abort(422, __('The gift card does not exist'));
+            }
+
+            $user = User::whereKey($request->user['id'])->lockForUpdate()->first();
+            if (!$user) {
+                abort(422, __('The user does not exist'));
+            }
+            if (!(bool)$giftcard->enabled) {
+                abort(422, __('The gift card is disabled'));
             }
 
             $currentTime = time();
             if ($giftcard->started_at && $currentTime < $giftcard->started_at) {
-                abort(500, __('The gift card is not yet valid'));
+                abort(422, __('The gift card is not yet valid'));
             }
-
             if ($giftcard->ended_at && $currentTime > $giftcard->ended_at) {
-                abort(500, __('The gift card has expired'));
+                abort(422, __('The gift card has expired'));
+            }
+            if ($giftcard->limit_use !== null && (int)$giftcard->limit_use <= 0) {
+                abort(422, __('The gift card usage limit has been reached'));
             }
 
-            if ($giftcard->limit_use !== null) {
-                if (!is_numeric($giftcard->limit_use) || $giftcard->limit_use <= 0) {
-                    abort(500, __('The gift card usage limit has been reached'));
-                }
+            $usedUserIds = (array)($giftcard->used_user_ids ?: []);
+            if (in_array((int)$user->id, array_map('intval', $usedUserIds), true)
+                || GiftcardUsage::where('giftcard_id', $giftcard->id)->where('user_id', $user->id)->exists()) {
+                abort(422, __('The gift card has already been used by this user'));
             }
 
-            $usedUserIds = $giftcard->used_user_ids ? json_decode($giftcard->used_user_ids, true) : [];
-            if (!is_array($usedUserIds)) {
-                $usedUserIds = [];
-            }
-
-            if (in_array($user->id, $usedUserIds)) {
-                abort(500, __('The gift card has already been used by this user'));
-            }
-
-            $usedUserIds[] = $user->id;
-            $giftcard->used_user_ids = json_encode($usedUserIds);
-
-            switch ($giftcard->type) {
+            switch ((int)$giftcard->type) {
                 case 1:
                     $user->balance += $giftcard->value;
                     break;
@@ -209,7 +201,7 @@ class UserController extends Controller
                             $user->expired_at += $giftcard->value * 86400;
                         }
                     } else {
-                        abort(500, __('Not suitable gift card type'));
+                        abort(422, __('Not suitable gift card type'));
                     }
                     break;
                 case 3:
@@ -221,7 +213,10 @@ class UserController extends Controller
                     break;
                 case 5:
                     if ($user->plan_id == null || ($user->expired_at !== null && $user->expired_at < $currentTime)) {
-                        $plan = Plan::where('id', $giftcard->plan_id)->first();
+                        $plan = Plan::find($giftcard->plan_id);
+                        if (!$plan) {
+                            abort(422, __('Subscription plan does not exist'));
+                        }
                         $user->plan_id = $plan->id;
                         $user->group_id = $plan->group_id;
                         $user->transfer_enable = $plan->transfer_enable * 1073741824;
@@ -234,32 +229,41 @@ class UserController extends Controller
                             $user->expired_at = $currentTime + $giftcard->value * 86400;
                         }
                     } else {
-                        abort(500, __('Not suitable gift card type'));
+                        abort(422, __('Not suitable gift card type'));
                     }
                     break;
                 default:
-                    abort(500, __('Unknown gift card type'));
+                    abort(422, __('Unknown gift card type'));
             }
 
             if ($giftcard->limit_use !== null) {
-                $giftcard->limit_use -= 1;
+                $giftcard->limit_use = (int)$giftcard->limit_use - 1;
             }
+            $usedUserIds[] = (int)$user->id;
+            $giftcard->used_user_ids = array_values(array_unique(array_map('intval', $usedUserIds)));
+            $giftcard->used_at = $currentTime;
+            $giftcard->used_by_user_id = $user->id;
 
             if (!$user->save() || !$giftcard->save()) {
                 throw new \Exception(__('Save failed'));
             }
 
-            DB::commit();
-
-            return response([
-                'data' => true,
+            GiftcardUsage::create([
+                'giftcard_id' => $giftcard->id,
+                'user_id' => $user->id,
                 'type' => $giftcard->type,
-                'value' => $giftcard->value
+                'value' => $giftcard->value,
+                'plan_id' => $giftcard->plan_id,
+                'ip' => $request->ip(),
+                'user_agent' => mb_substr((string)$request->userAgent(), 0, 500),
+                'created_at' => $currentTime,
+                'updated_at' => $currentTime,
             ]);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            abort(500, $e->getMessage());
-        }
+
+            return ['type' => (int)$giftcard->type, 'value' => (int)$giftcard->value];
+        }, 3);
+
+        return response(['data' => true] + $result);
     }
 
     public function info(Request $request)
@@ -373,13 +377,26 @@ class UserController extends Controller
 
     public function resetSecurity(Request $request)
     {
-        $user = User::find($request->user['id']);
-        if (!$user) {
-            abort(500, __('The user does not exist'));
-        }
-        $user->uuid = Helper::guid(true);
-        $user->token = Helper::guid();
-        if (!$user->save()) {
+        try {
+            $user = DB::transaction(function () use ($request) {
+                $user = User::query()
+                    ->whereKey($request->user['id'])
+                    ->lockForUpdate()
+                    ->first();
+                if (!$user) {
+                    abort(500, __('The user does not exist'));
+                }
+                $user->uuid = Helper::guid(true);
+                $user->token = Helper::guid();
+                if (!$user->save()) {
+                    throw new \RuntimeException(__('Reset failed'));
+                }
+                (new RavelCredentialService())->revokeUser($user, true);
+                return $user;
+            });
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
+        } catch (\Throwable $e) {
             abort(500, __('Reset failed'));
         }
         return response([

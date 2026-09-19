@@ -18,11 +18,78 @@ use App\Models\StatServer;
 use App\Models\StatUser;
 use App\Models\Ticket;
 use App\Models\User;
+use App\Services\StatisticalService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class StatController extends Controller
 {
+    public function getStat(Request $request)
+    {
+        $params = $request->validate([
+            'start_at' => 'nullable|integer',
+            'end_at' => 'nullable|integer',
+        ]);
+
+        if (!empty($params['start_at']) && !empty($params['end_at'])) {
+            $stats = Stat::where('record_at', '>=', $params['start_at'])
+                ->where('record_at', '<', $params['end_at'])
+                ->get()
+                ->makeHidden(['record_at', 'created_at', 'updated_at', 'id', 'record_type'])
+                ->toArray();
+
+            $data = array_reduce($stats, function ($carry, $item) {
+                foreach ($item as $key => $value) {
+                    $carry[$key] = ($carry[$key] ?? 0) + $value;
+                }
+                return $carry;
+            }, []);
+
+            return ['data' => $data];
+        }
+
+        return ['data' => (new StatisticalService())->generateStatData()];
+    }
+
+    public function getStatRecord(Request $request)
+    {
+        $params = $request->validate([
+            'type' => 'required|in:paid_total,commission_total,register_count',
+            'start_at' => 'nullable|integer',
+            'end_at' => 'nullable|integer',
+        ]);
+
+        $service = new StatisticalService();
+        if (!empty($params['start_at'])) {
+            $service->setStartAt($params['start_at']);
+        }
+        if (!empty($params['end_at'])) {
+            $service->setEndAt($params['end_at']);
+        }
+
+        return ['data' => $service->getStatRecord($params['type'])];
+    }
+
+    public function getRanking(Request $request)
+    {
+        $params = $request->validate([
+            'type' => 'required|in:server_traffic_rank,user_consumption_rank,invite_rank',
+            'start_at' => 'nullable|integer',
+            'end_at' => 'nullable|integer',
+            'limit' => 'nullable|integer|min:1|max:100',
+        ]);
+
+        $service = new StatisticalService();
+        if (!empty($params['start_at'])) {
+            $service->setStartAt($params['start_at']);
+        }
+        if (!empty($params['end_at'])) {
+            $service->setEndAt($params['end_at']);
+        }
+
+        return ['data' => $service->getRanking($params['type'], $params['limit'] ?? 20)];
+    }
+
     public function getOverride(Request $request)
     {
         return [

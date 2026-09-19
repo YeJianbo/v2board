@@ -13,6 +13,7 @@ use App\Models\ServerVmess;
 use App\Models\ServerTrojan;
 use App\Models\ServerTuic;
 use App\Models\ServerAnytls;
+use App\Models\RavelCredential;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Support\Facades\Cache;
@@ -20,37 +21,115 @@ use Illuminate\Support\Facades\DB;
 
 class ServerService
 {
-    private function serverStatus(string $serverType, array $serverIds): array
+    private $availableServerCollections;
+
+    private function availableServerCollection(string $type)
     {
-        $serverType = strtoupper($serverType);
-        $serverIds = array_values(array_unique(array_filter($serverIds, function ($serverId) {
-            return $serverId !== null && $serverId !== '' && (int) $serverId > 0;
-        })));
+        if ($this->availableServerCollections === null) {
+            $loaders = [
+                'vless' => static function () {
+                    return ServerVless::orderBy('sort', 'ASC')->get();
+                },
+                'vmess' => static function () {
+                    return ServerVmess::orderBy('sort', 'ASC')->get();
+                },
+                'trojan' => static function () {
+                    return ServerTrojan::orderBy('sort', 'ASC')->get();
+                },
+                'tuic' => static function () {
+                    return ServerTuic::orderBy('sort', 'ASC')->get()->keyBy('id');
+                },
+                'hysteria' => static function () {
+                    return ServerHysteria::orderBy('sort', 'ASC')->get()->keyBy('id');
+                },
+                'shadowsocks' => static function () {
+                    return ServerShadowsocks::orderBy('sort', 'ASC')->get()->keyBy('id');
+                },
+                'anytls' => static function () {
+                    return ServerAnytls::orderBy('sort', 'ASC')->get()->keyBy('id');
+                },
+                'v2node' => static function () {
+                    return ServerV2node::orderBy('sort', 'ASC')->get()->keyBy('id');
+                },
+            ];
+            $cacheKeys = [];
+            foreach (array_keys($loaders) as $serverType) {
+                $cacheKeys[$serverType] = 'servers_' . $serverType;
+            }
+            $cachedCollections = Cache::many(array_values($cacheKeys));
+            $this->availableServerCollections = [];
 
-        $online = 0;
-        $lastCheckAt = 0;
-        $lastPushAt = 0;
-
-        foreach ($serverIds as $serverId) {
-            $online = max(
-                $online,
-                (int) Cache::get(CacheKey::get("SERVER_{$serverType}_ONLINE_USER", $serverId), 0)
-            );
-            $lastCheckAt = max(
-                $lastCheckAt,
-                (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_CHECK_AT", $serverId), 0)
-            );
-            $lastPushAt = max(
-                $lastPushAt,
-                (int) Cache::get(CacheKey::get("SERVER_{$serverType}_LAST_PUSH_AT", $serverId), 0)
-            );
+            foreach ($loaders as $serverType => $loader) {
+                $cacheKey = $cacheKeys[$serverType];
+                $collection = $cachedCollections[$cacheKey] ?? null;
+                if ($collection === null) {
+                    $collection = $loader();
+                    Cache::put($cacheKey, $collection, 60);
+                }
+                $this->availableServerCollections[$serverType] = $collection;
+            }
         }
 
-        return [
-            'online' => $online,
-            'last_check_at' => $lastCheckAt,
-            'last_push_at' => $lastPushAt
-        ];
+        return $this->availableServerCollections[$type];
+    }
+
+    private function serverStatuses(array $servers): array
+    {
+        $definitions = [];
+        $cacheKeys = [];
+        foreach ($servers as $index => $server) {
+            $serverType = strtoupper((string) ($server['type'] ?? ''));
+            $serverIds = array_values(array_unique(array_filter(
+                $this->serverStatusIds($server),
+                static function ($serverId) {
+                    return $serverId !== null && $serverId !== '' && (int) $serverId > 0;
+                }
+            )));
+            $definitions[$index] = [
+                'type' => $serverType,
+                'ids' => $serverIds,
+            ];
+
+            if ($serverType === '') {
+                continue;
+            }
+            foreach ($serverIds as $serverId) {
+                $cacheKeys[] = CacheKey::get("SERVER_{$serverType}_ONLINE_USER", $serverId);
+                $cacheKeys[] = CacheKey::get("SERVER_{$serverType}_LAST_CHECK_AT", $serverId);
+                $cacheKeys[] = CacheKey::get("SERVER_{$serverType}_LAST_PUSH_AT", $serverId);
+            }
+        }
+        $statusValues = $cacheKeys ? Cache::many(array_values(array_unique($cacheKeys))) : [];
+
+        $statuses = [];
+        foreach ($definitions as $index => $definition) {
+            $online = 0;
+            $lastCheckAt = 0;
+            $lastPushAt = 0;
+            foreach ($definition['ids'] as $serverId) {
+                $serverType = $definition['type'];
+                $online = max(
+                    $online,
+                    (int) ($statusValues[CacheKey::get("SERVER_{$serverType}_ONLINE_USER", $serverId)] ?? 0)
+                );
+                $lastCheckAt = max(
+                    $lastCheckAt,
+                    (int) ($statusValues[CacheKey::get("SERVER_{$serverType}_LAST_CHECK_AT", $serverId)] ?? 0)
+                );
+                $lastPushAt = max(
+                    $lastPushAt,
+                    (int) ($statusValues[CacheKey::get("SERVER_{$serverType}_LAST_PUSH_AT", $serverId)] ?? 0)
+                );
+            }
+
+            $statuses[$index] = [
+                'online' => $online,
+                'last_check_at' => $lastCheckAt,
+                'last_push_at' => $lastPushAt,
+            ];
+        }
+
+        return $statuses;
     }
 
     private function serverStatusIds(array $server): array
@@ -79,20 +158,13 @@ class ServerService
     public function getAvailableVless(User $user): array
     {
         $servers = [];
-        $server = Cache::remember('servers_vless', 60, function() {
-            return ServerVless::orderBy('sort', 'ASC')->get();
-        });
+        $server = $this->availableServerCollection('vless');
         foreach ($server as $key => $v) {
             if (!$v['show']) continue;
             $server[$key]['type'] = 'vless';
             if (!in_array($user->group_id, $server[$key]['group_id'])) continue;
             if (strpos($server[$key]['port'], '-') !== false) {
                 $server[$key]['port'] = Helper::randomPort($server[$key]['port']);
-            }
-            if ($server[$key]['parent_id']) {
-                $server[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_VLESS_LAST_CHECK_AT', $server[$key]['parent_id']));
-            } else {
-                $server[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_VLESS_LAST_CHECK_AT', $server[$key]['id']));
             }
             if (isset($server[$key]['tls_settings'])) {
                 $server[$key]['tls_settings'] = array_diff_key(
@@ -117,20 +189,13 @@ class ServerService
     public function getAvailableVmess(User $user): array
     {
         $servers = [];
-        $vmess = Cache::remember('servers_vmess', 60, function() {
-            return ServerVmess::orderBy('sort', 'ASC')->get();
-        });
+        $vmess = $this->availableServerCollection('vmess');
         foreach ($vmess as $key => $v) {
             if (!$v['show']) continue;
             $vmess[$key]['type'] = 'vmess';
             if (!in_array($user->group_id, $vmess[$key]['group_id'])) continue;
             if (strpos($vmess[$key]['port'], '-') !== false) {
                 $vmess[$key]['port'] = Helper::randomPort($vmess[$key]['port']);
-            }
-            if ($vmess[$key]['parent_id']) {
-                $vmess[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_VMESS_LAST_CHECK_AT', $vmess[$key]['parent_id']));
-            } else {
-                $vmess[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_VMESS_LAST_CHECK_AT', $vmess[$key]['id']));
             }
             $servers[] = $vmess[$key]->toArray();
         }
@@ -142,20 +207,13 @@ class ServerService
     public function getAvailableTrojan(User $user): array
     {
         $servers = [];
-        $trojan = Cache::remember('servers_trojan', 60, function() {
-            return ServerTrojan::orderBy('sort', 'ASC')->get();
-        });
+        $trojan = $this->availableServerCollection('trojan');
         foreach ($trojan as $key => $v) {
             if (!$v['show']) continue;
             $trojan[$key]['type'] = 'trojan';
             if (!in_array($user->group_id, $trojan[$key]['group_id'])) continue;
             if (strpos($trojan[$key]['port'], '-') !== false) {
                 $trojan[$key]['port'] = Helper::randomPort($trojan[$key]['port']);
-            }
-            if ($trojan[$key]['parent_id']) {
-                $trojan[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_TROJAN_LAST_CHECK_AT', $trojan[$key]['parent_id']));
-            } else {
-                $trojan[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_TROJAN_LAST_CHECK_AT', $trojan[$key]['id']));
             }
             $servers[] = $trojan[$key]->toArray();
         }
@@ -165,16 +223,12 @@ class ServerService
     public function getAvailableTuic(User $user)
     {
         $availableServers = [];
-        $servers = Cache::remember('servers_tuic', 60, function() {
-            return ServerTuic::orderBy('sort', 'ASC')->get()->keyBy('id');
-        });
+        $servers = $this->availableServerCollection('tuic');
         foreach ($servers as $key => $v) {
             if (!$v['show']) continue;
             $servers[$key]['type'] = 'tuic';
-            $servers[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_TUIC_LAST_CHECK_AT', $v['id']));
             if (!in_array($user->group_id, $v['group_id'])) continue;
             if (isset($servers[$v['parent_id']])) {
-                $servers[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_TUIC_LAST_CHECK_AT', $v['parent_id']));
                 $servers[$key]['created_at'] = $servers[$v['parent_id']]['created_at'];
             }
             $availableServers[] = $servers[$key]->toArray();
@@ -185,16 +239,12 @@ class ServerService
     public function getAvailableHysteria(User $user)
     {
         $availableServers = [];
-        $servers = Cache::remember('servers_hysteria', 60, function() {
-            return ServerHysteria::orderBy('sort', 'ASC')->get()->keyBy('id');
-        });
+        $servers = $this->availableServerCollection('hysteria');
         foreach ($servers as $key => $v) {
             if (!$v['show']) continue;
             $servers[$key]['type'] = 'hysteria';
-            $servers[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_HYSTERIA_LAST_CHECK_AT', $v['id']));
             if (!in_array($user->group_id, $v['group_id'])) continue;
             if (isset($servers[$v['parent_id']])) {
-                $servers[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_HYSTERIA_LAST_CHECK_AT', $v['parent_id']));
                 $servers[$key]['created_at'] = $servers[$v['parent_id']]['created_at'];
             }
             $servers[$key]['server_key'] = Helper::getServerKey($servers[$key]['created_at'], 16);
@@ -206,19 +256,15 @@ class ServerService
     public function getAvailableShadowsocks(User $user)
     {
         $servers = [];
-        $shadowsocks = Cache::remember('servers_shadowsocks', 60, function() {
-            return ServerShadowsocks::orderBy('sort', 'ASC')->get()->keyBy('id');
-        });
+        $shadowsocks = $this->availableServerCollection('shadowsocks');
         foreach ($shadowsocks as $key => $v) {
             if (!$v['show']) continue;
             $shadowsocks[$key]['type'] = 'shadowsocks';
-            $shadowsocks[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_SHADOWSOCKS_LAST_CHECK_AT', $v['id']));
             if (!in_array($user->group_id, $v['group_id'])) continue;
             if (strpos($v['port'], '-') !== false) {
                 $shadowsocks[$key]['port'] = Helper::randomPort($v['port']);
             }
             if (isset($shadowsocks[$v['parent_id']])) {
-                $shadowsocks[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_SHADOWSOCKS_LAST_CHECK_AT', $v['parent_id']));
                 $shadowsocks[$key]['created_at'] = $shadowsocks[$v['parent_id']]['created_at'];
             }
             if ($v['obfs'] === 'http') {
@@ -234,19 +280,15 @@ class ServerService
     public function getAvailableAnyTLS(User $user)
     {
         $servers = [];
-        $anytls = Cache::remember('servers_anytls', 60, function() {
-            return ServerAnytls::orderBy('sort', 'ASC')->get()->keyBy('id');
-        });
+        $anytls = $this->availableServerCollection('anytls');
         foreach ($anytls as $key => $v) {
             if (!$v['show']) continue;
             $anytls[$key]['type'] = 'anytls';
-            $anytls[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_ANYTLS_LAST_CHECK_AT', $v['id']));
             if (!in_array($user->group_id, $v['group_id'])) continue;
             if (strpos($v['port'], '-') !== false) {
                 $anytls[$key]['port'] = Helper::randomPort($v['port']);
             }
             if (isset($anytls[$v['parent_id']])) {
-                $anytls[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_ANYTLS_LAST_CHECK_AT', $v['parent_id']));
                 $anytls[$key]['created_at'] = $anytls[$v['parent_id']]['created_at'];
             }
             $servers[] = $anytls[$key]->toArray();
@@ -257,16 +299,12 @@ class ServerService
     public function getAvailableV2node(User $user)
     {
         $servers = [];
-        $v2node = Cache::remember('servers_v2node', 60, function() {
-            return ServerV2node::orderBy('sort', 'ASC')->get()->keyBy('id');
-        });
+        $v2node = $this->availableServerCollection('v2node');
         foreach ($v2node as $key => $v) {
             if (!$v['show']) continue;
             $v2node[$key]['type'] = 'v2node';
-            $v2node[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_V2NODE_LAST_CHECK_AT', $v['id']));
             if (!in_array($user->group_id, $v['group_id'])) continue;
             if (isset($v2node[$v['parent_id']])) {
-                $v2node[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_V2NODE_LAST_CHECK_AT', $v['parent_id']));
                 $v2node[$key]['created_at'] = $v2node[$v['parent_id']]['created_at'];
             }
             if (isset($v2node[$key]['tls_settings'])) {
@@ -282,12 +320,18 @@ class ServerService
                     $v2node[$key]['encryption_settings'] = array_diff_key($v2node[$key]['encryption_settings'], array('private_key' => ''));
                 }
             }
-            $servers[] = $v2node[$key]->toArray();
+            $payload = $v2node[$key]->toArray();
+            if ((string) $v2node[$key]['protocol'] === 'ravel') {
+                $credentialService = new RavelCredentialService();
+                $payload['ravel_credentials'] = $credentialService
+                    ->credentialsForSubscription($v2node[$key], $user);
+            }
+            $servers[] = $payload;
         }
         return $servers;
     }
 
-    public function getAvailableServers(User $user)
+    public function getAvailableServers(User $user, bool $withStatus = true)
     {
         $servers = array_merge(
             $this->getAvailableShadowsocks($user),
@@ -301,22 +345,30 @@ class ServerService
         );
         $tmp = array_column($servers, 'sort');
         array_multisort($tmp, SORT_ASC, $servers);
-        return array_map(function ($server) {
+        $statuses = $withStatus ? $this->serverStatuses($servers) : [];
+        foreach ($servers as $index => &$server) {
             if (strpos($server['port'], '-')) {
                 $server['mport'] = (string)$server['port'];
             } else {
                 $server['port'] = (int)$server['port'];
             }
-            $serverType = strtoupper($server['type']);
-            $status = $this->serverStatus($serverType, $this->serverStatusIds($server));
+            if (!$withStatus) {
+                continue;
+            }
+            $status = $statuses[$index] ?? [
+                'last_check_at' => 0,
+                'last_push_at' => 0,
+            ];
             $lastCheckAt = max((int) ($server['last_check_at'] ?? 0), $status['last_check_at']);
             $lastPushAt = $status['last_push_at'];
             $server['last_check_at'] = $lastCheckAt;
             $server['last_push_at'] = $lastPushAt;
             $server['is_online'] = max($lastCheckAt, $lastPushAt) > 0 ? 1 : 0;
             $server['cache_key'] = "{$server['type']}-{$server['id']}-{$server['updated_at']}-{$server['is_online']}";
-            return $server;
-        }, $servers);
+        }
+        unset($server);
+
+        return app(SubscriptionEntryService::class)->apply($servers);
     }
 
     public function getAvailableUsers($groupId)
@@ -454,10 +506,38 @@ class ServerService
         $servers = ServerV2node::orderBy('sort', 'ASC')
             ->get()
             ->toArray();
+        $ravelIds = array_column(array_filter($servers, static function ($server) {
+            return ($server['protocol'] ?? '') === 'ravel';
+        }), 'id');
+        $credentialSummaries = !$ravelIds ? collect() : RavelCredential::query()
+            ->whereIn('server_id', $ravelIds)
+            ->select([
+                'server_id',
+                'key_version',
+                'revoked_at',
+                'not_before',
+                'not_after',
+            ])
+            ->get()
+            ->groupBy('server_id');
+        $now = time();
         foreach ($servers as $k => $v) {
             $servers[$k]['type'] = 'v2node';
             if (isset($v['padding_scheme'])) {
                 $servers[$k]['padding_scheme'] = json_encode($v['padding_scheme']);
+            }
+            if ((string) ($v['protocol'] ?? '') === 'ravel') {
+                $credentials = $credentialSummaries->get((int) $v['id'], collect());
+                $servers[$k]['ravel_credential_summary'] = [
+                    'total' => $credentials->count(),
+                    'active' => $credentials->filter(function ($credential) use ($now) {
+                        return $credential->revoked_at === null
+                            && (int) $credential->not_before <= $now
+                            && (int) $credential->not_after > $now;
+                    })->count(),
+                    'revoked' => $credentials->whereNotNull('revoked_at')->count(),
+                    'latest_key_version' => (int) $credentials->max('key_version'),
+                ];
             }
 
             $apiHost = $this->panelSetting('server_api_url')
@@ -469,10 +549,12 @@ class ServerService
             $apiKey = (string) $apiKey;
 
             if ($apiHost !== '' && $apiKey !== '') {
+                $installerUrl = (string) config('probe.installer_url');
                 $apiHostArg = escapeshellarg($apiHost);
                 $apiKeyArg = escapeshellarg($apiKey);
                 $servers[$k]['install_command'] = sprintf(
-                    'wget -N https://raw.githubusercontent.com/YeJianbo/v2node/main/script/install.sh && bash install.sh --api-host %s --node-id %d --api-key %s',
+                    'curl -fL --proto \'=https\' --tlsv1.2 %s -o ravel-install.sh && bash ravel-install.sh --api-host %s --node-id %d --api-key %s',
+                    escapeshellarg($installerUrl),
                     $apiHostArg,
                     $nodeId,
                     $apiKeyArg
@@ -487,9 +569,13 @@ class ServerService
 
     private function mergeData(&$servers)
     {
+        $statuses = $this->serverStatuses($servers);
         foreach ($servers as $k => $v) {
-            $serverType = strtoupper($v['type']);
-            $status = $this->serverStatus($serverType, $this->serverStatusIds($v));
+            $status = $statuses[$k] ?? [
+                'online' => 0,
+                'last_check_at' => 0,
+                'last_push_at' => 0,
+            ];
             $online = $status['online'];
             $lastCheckAt = $status['last_check_at'];
             $lastPushAt = $status['last_push_at'];
@@ -524,6 +610,47 @@ class ServerService
         $this->mergeData($servers);
         $tmp = array_column($servers, 'sort');
         array_multisort($tmp, SORT_ASC, $servers);
+        return $servers;
+    }
+
+    public function getNodeStatusSummary(): array
+    {
+        $nodes = $this->getNodeStatusDetails();
+        return [
+            'total' => count($nodes),
+            'online' => count(array_filter($nodes, static fn ($node) => $node['is_online'])),
+        ];
+    }
+
+    public function getNodeStatusDetails(): array
+    {
+        $servers = [];
+        foreach (['shadowsocks', 'vmess', 'trojan', 'tuic', 'hysteria', 'vless', 'anytls', 'v2node'] as $type) {
+            foreach ($this->availableServerCollection($type) as $server) {
+                $servers[] = [
+                    'type' => $type,
+                    'id' => $server['id'],
+                    'parent_id' => $server['parent_id'] ?? null,
+                    'key' => $type . ':' . $server['id'],
+                    'name' => (string) ($server['name'] ?? ''),
+                    'protocol' => (string) ($server['protocol'] ?? $type),
+                    'host' => (string) ($server['host'] ?? ''),
+                    'port' => $server['port'] ?? '',
+                    'show' => (bool) ($server['show'] ?? false),
+                    'sort' => (int) ($server['sort'] ?? 0),
+                ];
+            }
+        }
+
+        // Match node management: children inherit their same-protocol parent's heartbeat.
+        $statuses = $this->serverStatuses($servers);
+        foreach ($servers as $index => &$server) {
+            $status = $statuses[$index];
+            $server['last_active_at'] = max($status['last_check_at'], $status['last_push_at']);
+            $server['is_online'] = $server['last_active_at'] > 0;
+        }
+        unset($server);
+        usort($servers, static fn ($a, $b) => [$a['sort'], $a['type'], $a['id']] <=> [$b['sort'], $b['type'], $b['id']]);
         return $servers;
     }
 

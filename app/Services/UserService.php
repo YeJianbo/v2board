@@ -6,6 +6,8 @@ use App\Jobs\TrafficFetchJob;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
+use App\Utils\Helper;
+use Illuminate\Support\Facades\Hash;
 
 class UserService
 {
@@ -194,6 +196,66 @@ class UserService
     public function getAllUsers()
     {
         return User::all();
+    }
+
+    public function createUser(array $data): User
+    {
+        $user = new User();
+        $user->email = trim($data['email']);
+        $user->password = Hash::make($data['password'] ?? $user->email);
+        $user->uuid = Helper::guid(true);
+        $user->token = Helper::guid();
+        $user->remind_expire = (int) admin_setting('default_remind_expire', 1);
+        $user->remind_traffic = (int) admin_setting('default_remind_traffic', 1);
+
+        foreach (['invite_user_id', 'telegram_id', 'group_id', 'speed_limit', 'device_limit', 'expired_at', 'transfer_enable'] as $field) {
+            if (array_key_exists($field, $data)) {
+                $user->{$field} = $data[$field];
+            }
+        }
+
+        if (!empty($data['plan_id'])) {
+            $this->setPlanForUser($user, (int) $data['plan_id'], $data['expired_at'] ?? null);
+        } else {
+            $this->setTryOutPlan($user);
+        }
+
+        return $user;
+    }
+
+    private function setPlanForUser(User $user, int $planId, ?int $expiredAt = null): void
+    {
+        $plan = Plan::find($planId);
+        if (!$plan) {
+            throw new \InvalidArgumentException('订阅计划不存在');
+        }
+
+        $user->plan_id = $plan->id;
+        $user->group_id = $plan->group_id;
+        $user->transfer_enable = $plan->transfer_enable * 1073741824;
+        $user->speed_limit = $plan->speed_limit;
+        $user->device_limit = $plan->device_limit;
+        $user->expired_at = $expiredAt;
+    }
+
+    private function setTryOutPlan(User $user): void
+    {
+        $planId = (int) admin_setting('try_out_plan_id', 0);
+        if (!$planId) {
+            return;
+        }
+
+        $plan = Plan::find($planId);
+        if (!$plan) {
+            return;
+        }
+
+        $user->plan_id = $plan->id;
+        $user->group_id = $plan->group_id;
+        $user->transfer_enable = $plan->transfer_enable * 1073741824;
+        $user->speed_limit = $plan->speed_limit;
+        $user->device_limit = $plan->device_limit;
+        $user->expired_at = time() + ((int) admin_setting('try_out_hour', 1) * 3600);
     }
 
     public function addBalance(int $userId, int $balance):bool

@@ -8,15 +8,18 @@ use App\Http\Requests\Admin\NoticeSave;
 use App\Models\Notice;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class NoticeController extends Controller
 {
     public function fetch(Request $request)
     {
-        return $this->success(
-            Notice::orderBy('id', 'DESC')
-                ->get()
-        );
+        $query = Notice::query();
+        if (Schema::hasColumn((new Notice())->getTable(), 'sort')) {
+            $query->orderByRaw('sort IS NULL, sort ASC');
+        }
+
+        return $this->success($query->orderBy('id', 'DESC')->get());
     }
 
     public function save(NoticeSave $request)
@@ -27,8 +30,15 @@ class NoticeController extends Controller
             'img_url',
             'tags',
             'show',
-            'popup'
+            'popup',
+            'sort'
         ]);
+        $table = (new Notice())->getTable();
+        foreach (['popup', 'sort'] as $optionalColumn) {
+            if (!Schema::hasColumn($table, $optionalColumn)) {
+                unset($data[$optionalColumn]);
+            }
+        }
         if (!$request->input('id')) {
             if (!Notice::create($data)) {
                 return $this->fail([500, '保存失败']);
@@ -86,6 +96,10 @@ class NoticeController extends Controller
         $params = $request->validate([
             'ids' => 'required|array'
         ]);
+
+        if (!Schema::hasColumn((new Notice())->getTable(), 'sort')) {
+            return $this->fail([503, '公告排序字段尚未初始化，请先执行数据库迁移']);
+        }
 
         try {
             DB::beginTransaction();

@@ -15,12 +15,13 @@ class CheckTelegramNotifications extends Command
     {
         $summary = $notificationService->checkMachines((bool) $this->option('dry-run'));
         $this->line(sprintf(
-            'machines=%d online=%d offline=%d alerts=%d recoveries=%d',
+            'machines=%d online=%d offline=%d alerts=%d recoveries=%d renewals=%d',
             $summary['machines'],
             $summary['online'],
             $summary['offline'],
             $summary['alerts'],
-            $summary['recoveries']
+            $summary['recoveries'],
+            $summary['renewals'] ?? 0
         ));
 
         return self::SUCCESS;

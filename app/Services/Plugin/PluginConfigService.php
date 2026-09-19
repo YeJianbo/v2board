@@ -63,12 +63,13 @@ class PluginConfigService
             }
             $values[$key] = $value;
         }
-        Plugin::query()
-            ->where('code', $pluginCode)
-            ->update([
-                'config' => json_encode($values),
-                'updated_at' => now()
-            ]);
+        $plugin = Plugin::query()->where('code', $pluginCode)->first();
+        if (!$plugin) {
+            throw new \Exception('插件未安装');
+        }
+
+        $plugin->config = $values;
+        $plugin->save();
 
         return true;
     }
@@ -106,6 +107,8 @@ class PluginConfigService
             return [];
         }
 
-        return json_decode($plugin->config, true);
+        return is_array($plugin->config)
+            ? $plugin->config
+            : (json_decode($plugin->config, true) ?: []);
     }
 }

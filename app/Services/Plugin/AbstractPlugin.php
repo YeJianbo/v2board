@@ -12,6 +12,7 @@ abstract class AbstractPlugin
     protected string $basePath;
     protected string $pluginCode;
     protected string $namespace;
+    protected array $registeredHooks = [];
 
     public function __construct(string $pluginCode)
     {
@@ -79,6 +80,7 @@ abstract class AbstractPlugin
     protected function listen(string $hook, callable $callback, int $priority = 20): void
     {
         HookManager::register($hook, $callback, $priority);
+        $this->registeredHooks[] = [$hook, $callback];
     }
 
     /**
@@ -87,6 +89,7 @@ abstract class AbstractPlugin
     protected function filter(string $hook, callable $callback, int $priority = 20): void
     {
         HookManager::registerFilter($hook, $callback, $priority);
+        $this->registeredHooks[] = [$hook, $callback];
     }
 
     /**
@@ -159,6 +162,14 @@ abstract class AbstractPlugin
     public function cleanup(): void
     {
         // 插件卸载时的清理逻辑
+    }
+
+    public function unregisterHooks(): void
+    {
+        foreach ($this->registeredHooks as [$hook, $callback]) {
+            HookManager::remove($hook, $callback);
+        }
+        $this->registeredHooks = [];
     }
 
     /**

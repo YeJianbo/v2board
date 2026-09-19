@@ -2,6 +2,7 @@
 
 namespace App\Protocols;
 
+use App\Models\SubscribeTemplate;
 use App\Utils\Helper;
 
 class Surge
@@ -59,13 +60,7 @@ class Surge
             }
         }
 
-        $defaultConfig = base_path() . '/resources/rules/default.surge.conf';
-        $customConfig = base_path() . '/resources/rules/custom.surge.conf';
-        if (\File::exists($customConfig)) {
-            $config = file_get_contents("$customConfig");
-        } else {
-            $config = file_get_contents("$defaultConfig");
-        }
+        $config = SubscribeTemplate::getContent('surge');
 
         // Subscription link
         $subsURL = Helper::getSubscribeUrl($user['token']);

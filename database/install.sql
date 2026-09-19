@@ -29,7 +29,8 @@ CREATE TABLE `v2_commission_log` (
                                      `get_amount` int(11) NOT NULL,
                                      `created_at` int(11) NOT NULL,
                                      `updated_at` int(11) NOT NULL,
-                                     PRIMARY KEY (`id`)
+                                     PRIMARY KEY (`id`),
+                                     INDEX `commission_dashboard_created_idx` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -56,19 +57,56 @@ CREATE TABLE `v2_coupon` (
 DROP TABLE IF EXISTS `v2_giftcard`;
 CREATE TABLE `v2_giftcard` (
                              `id` int(11) NOT NULL AUTO_INCREMENT,
+                             `template_id` int(11) unsigned DEFAULT NULL,
                              `code` varchar(255) NOT NULL,
                              `name` varchar(255) CHARACTER SET utf8mb4 NOT NULL,
                              `type` tinyint(1) NOT NULL,
                              `value` int(11) DEFAULT NULL,
                              `plan_id` int(11) DEFAULT NULL,
                              `limit_use` int(11) DEFAULT NULL,
+                             `enabled` tinyint(1) NOT NULL DEFAULT '1',
                              `used_user_ids` varchar(16384) DEFAULT NULL,
+                             `used_at` int(11) DEFAULT NULL,
+                             `used_by_user_id` int(11) unsigned DEFAULT NULL,
                              `started_at` int(11) NOT NULL,
                              `ended_at` int(11) NOT NULL,
                              `created_at` int(11) NOT NULL,
                              `updated_at` int(11) NOT NULL,
-                             PRIMARY KEY (`id`)
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `giftcard_code_unique` (`code`),
+                             KEY `giftcard_template_id` (`template_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+
+DROP TABLE IF EXISTS `v2_giftcard_usage`;
+CREATE TABLE `v2_giftcard_usage` (
+                                   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                                   `giftcard_id` int(11) unsigned NOT NULL,
+                                   `user_id` int(11) unsigned NOT NULL,
+                                   `type` tinyint(4) NOT NULL,
+                                   `value` int(11) DEFAULT NULL,
+                                   `plan_id` int(11) unsigned DEFAULT NULL,
+                                   `ip` varchar(45) DEFAULT NULL,
+                                   `user_agent` varchar(500) DEFAULT NULL,
+                                   `created_at` int(11) NOT NULL,
+                                   `updated_at` int(11) NOT NULL,
+                                   PRIMARY KEY (`id`),
+                                   UNIQUE KEY `giftcard_usage_card_user` (`giftcard_id`,`user_id`),
+                                   KEY `giftcard_usage_user_time` (`user_id`,`created_at`),
+                                   KEY `giftcard_usage_time` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+DROP TABLE IF EXISTS `v2_processing_batch`;
+CREATE TABLE `v2_processing_batch` (
+                                     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                                     `batch_id` char(32) NOT NULL,
+                                     `stream` varchar(96) NOT NULL,
+                                     `created_at` int(11) NOT NULL,
+                                     PRIMARY KEY (`id`),
+                                     UNIQUE KEY `v2_processing_batch_batch_id_unique` (`batch_id`),
+                                     KEY `processing_batch_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 DROP TABLE IF EXISTS `v2_invite_code`;
@@ -143,11 +181,14 @@ CREATE TABLE `v2_notice` (
                              `title` varchar(255) NOT NULL,
                              `content` text NOT NULL,
                              `show` tinyint(1) NOT NULL DEFAULT '0',
+                             `popup` tinyint(1) NOT NULL DEFAULT '0',
+                             `sort` int(11) DEFAULT NULL,
                              `img_url` varchar(255) DEFAULT NULL,
                              `tags` varchar(255) DEFAULT NULL,
                              `created_at` int(11) NOT NULL,
                              `updated_at` int(11) NOT NULL,
-                             PRIMARY KEY (`id`)
+                             PRIMARY KEY (`id`),
+                             KEY `v2_notice_sort_index` (`sort`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
@@ -180,7 +221,9 @@ CREATE TABLE `v2_order` (
                             PRIMARY KEY (`id`),
                             UNIQUE KEY `trade_no` (`trade_no`),
                             INDEX idx_user (`user_id`),
-                            INDEX idx_user_status (`user_id`, `status`)
+                            INDEX idx_user_status (`user_id`, `status`),
+                            INDEX `order_dashboard_created_status_idx` (`created_at`, `status`),
+                            INDEX `order_dashboard_commission_idx` (`commission_status`, `status`, `commission_balance`, `invite_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
@@ -200,6 +243,23 @@ CREATE TABLE `v2_payment` (
                               `created_at` int(11) NOT NULL,
                               `updated_at` int(11) NOT NULL,
                               PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+DROP TABLE IF EXISTS `v2_plugin`;
+CREATE TABLE `v2_plugin` (
+                             `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+                             `code` varchar(64) NOT NULL,
+                             `name` varchar(255) NOT NULL,
+                             `version` varchar(32) NOT NULL,
+                             `type` varchar(32) NOT NULL DEFAULT 'feature',
+                             `is_enabled` tinyint(1) NOT NULL DEFAULT '0',
+                             `config` json DEFAULT NULL,
+                             `installed_at` bigint unsigned DEFAULT NULL,
+                             `created_at` bigint unsigned DEFAULT NULL,
+                             `updated_at` bigint unsigned DEFAULT NULL,
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `v2_plugin_code_unique` (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -462,9 +522,37 @@ CREATE TABLE `v2_server_v2node` (
                                     `obfs` varchar(64) DEFAULT NULL COMMENT 'hysteria1混淆密码/hysteria2混淆类型',
                                     `obfs_password` varchar(255) DEFAULT NULL COMMENT 'hysteria2混淆密码',
                                     `padding_scheme` text COMMENT 'anytls填充配置',
+                                    `ravel_authority` varchar(255) DEFAULT NULL COMMENT 'Ravel HTTP authority',
+                                    `ravel_path` varchar(2048) DEFAULT NULL COMMENT 'Ravel request path',
+                                    `ravel_gateway_group` char(8) DEFAULT NULL COMMENT 'Ravel 8-byte gateway group',
+                                    `ravel_masquerade` varchar(2048) DEFAULT NULL COMMENT 'Ravel masquerade URL',
+                                    `ravel_settings` text COMMENT 'Non-secret Ravel settings',
                                     `created_at` int(11) NOT NULL,
                                     `updated_at` int(11) NOT NULL,
                                     PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_ravel_credential`;
+CREATE TABLE `v2_ravel_credential` (
+                                       `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                                       `server_id` int(10) unsigned NOT NULL,
+                                       `user_id` int(10) unsigned NOT NULL,
+                                       `credential_id` char(32) NOT NULL,
+                                       `capability_key_ciphertext` text NOT NULL,
+                                       `key_version` int(10) unsigned NOT NULL,
+                                       `policy_id` bigint(20) unsigned NOT NULL DEFAULT '0',
+                                       `gateway_group` char(8) NOT NULL,
+                                       `not_before` bigint(20) unsigned NOT NULL,
+                                       `not_after` bigint(20) unsigned NOT NULL,
+                                       `revoked_at` bigint(20) unsigned DEFAULT NULL,
+                                       `superseded_at` bigint(20) unsigned DEFAULT NULL,
+                                       `created_at` bigint(20) unsigned NOT NULL,
+                                       `updated_at` bigint(20) unsigned NOT NULL,
+                                       PRIMARY KEY (`id`),
+                                       UNIQUE KEY `uq_ravel_credential_id` (`credential_id`),
+                                       UNIQUE KEY `uq_ravel_server_user_version` (`server_id`,`user_id`,`key_version`),
+                                       KEY `idx_ravel_server_active` (`server_id`,`revoked_at`,`not_before`,`not_after`),
+                                       KEY `idx_ravel_user_server_active` (`user_id`,`server_id`,`revoked_at`,`not_after`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DROP TABLE IF EXISTS `v2_stat`;
@@ -542,6 +630,8 @@ CREATE TABLE `v2_stat_user_server` (
                                        UNIQUE KEY `user_server_type_rate_record_at` (`user_id`,`server_id`,`server_type`,`server_rate`,`record_at`),
                                        KEY `user_id` (`user_id`),
                                        KEY `server_type_index` (`server_id`,`server_type`),
+                                       KEY `sus_user_record_at` (`user_id`,`record_at`),
+                                       KEY `sus_server_record_at` (`server_id`,`server_type`,`record_at`),
                                        KEY `record_at` (`record_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户节点数据统计';
 
@@ -563,6 +653,8 @@ CREATE TABLE `v2_stat_user_server_hour` (
                                             UNIQUE KEY `user_server_type_rate_hour_at` (`user_id`,`server_id`,`server_type`,`server_rate`,`record_at`),
                                             KEY `user_id` (`user_id`),
                                             KEY `server_hour_type_index` (`server_id`,`server_type`),
+                                            KEY `sus_hour_user_record_at` (`user_id`,`record_at`),
+                                            KEY `sus_hour_server_record_at` (`server_id`,`server_type`,`record_at`),
                                             KEY `record_at` (`record_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户节点小时数据统计';
 
@@ -584,6 +676,8 @@ CREATE TABLE `v2_stat_user_server_minute` (
                                               UNIQUE KEY `user_server_type_rate_minute_at` (`user_id`,`server_id`,`server_type`,`server_rate`,`record_at`),
                                               KEY `user_id` (`user_id`),
                                               KEY `server_minute_type_index` (`server_id`,`server_type`),
+                                              KEY `sus_minute_user_record_at` (`user_id`,`record_at`),
+                                              KEY `sus_minute_server_record_at` (`server_id`,`server_type`,`record_at`),
                                               KEY `record_at` (`record_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户节点分钟数据统计';
 
@@ -598,7 +692,8 @@ CREATE TABLE `v2_ticket` (
                              `reply_status` tinyint(1) NOT NULL DEFAULT '0' COMMENT '0:待回复 1:已回复',
                              `created_at` int(11) NOT NULL,
                              `updated_at` int(11) NOT NULL,
-                             PRIMARY KEY (`id`)
+                             PRIMARY KEY (`id`),
+                             INDEX `ticket_dashboard_status_idx` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
@@ -652,7 +747,10 @@ CREATE TABLE `v2_user` (
                            `updated_at` int(11) NOT NULL,
                            PRIMARY KEY (`id`),
                            UNIQUE KEY `email` (`email`),
-                           UNIQUE KEY `token` (`token`)
+                           UNIQUE KEY `token` (`token`),
+                           INDEX `user_dashboard_online_idx` (`t`),
+                           INDEX `user_dashboard_created_idx` (`created_at`),
+                           INDEX `user_dashboard_expired_idx` (`expired_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 

@@ -31,6 +31,26 @@ class AdminRoute
             'prefix' => config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))),
             'middleware' => ['admin', 'log'],
         ], function ($router) {
+            $router->get('agent/settings', [\App\Http\Controllers\V2\Admin\AgentController::class, 'settings']);
+            $router->post('agent/settings', [\App\Http\Controllers\V2\Admin\AgentController::class, 'save']);
+            $router->post('agent/chat', [\App\Http\Controllers\V2\Admin\AgentController::class, 'chat'])->middleware('throttle:6,1');
+            $router->post('agent/start', [\App\Http\Controllers\V2\Admin\AgentController::class, 'start'])->middleware('throttle:6,1');
+            $router->get('agent/run', [\App\Http\Controllers\V2\Admin\AgentController::class, 'run']);
+            $router->post('agent/run-cancel', [\App\Http\Controllers\V2\Admin\AgentController::class, 'cancelRun']);
+            $router->get('agent/conversation', [\App\Http\Controllers\V2\Admin\AgentController::class, 'conversation']);
+            $router->post('agent/confirm', [\App\Http\Controllers\V2\Admin\AgentController::class, 'confirm']);
+            $router->get('model-relay/status', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'status']);
+            $router->get('model-relay/usage', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'usage']);
+            $router->get('model-relay/quality', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'quality']);
+            $router->post('model-relay/quality-settings', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'qualitySave']);
+            $router->post('model-relay/quality-run', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'qualityRun'])->middleware('throttle:3,1');
+            $router->post('model-relay/quality-baseline', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'qualityBaseline']);
+            $router->post('model-relay/upstream', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'upstream']);
+            $router->post('model-relay/test', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'test'])->middleware('throttle:6,1');
+            $router->post('model-relay/key', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'saveKey']);
+            $router->post('model-relay/key-action', [\App\Http\Controllers\V2\Admin\ModelRelayController::class, 'keyAction']);
+            $router->post('subscription-entry/preview', [\App\Http\Controllers\V2\Admin\SubscriptionEntryController::class, 'preview']);
+            $router->post('subscription-entry/apply', [\App\Http\Controllers\V2\Admin\SubscriptionEntryController::class, 'apply']);
             // Config
             $router->group([
                 'prefix' => 'config'
@@ -45,6 +65,11 @@ class AdminRoute
             });
             $router->get('/backup/status', [BackupController::class, 'status']);
             $router->post('/backup/run', [BackupController::class, 'run']);
+            $router->get('/backup/google/status', [BackupController::class, 'googleStatus']);
+            $router->post('/backup/google/configure', [BackupController::class, 'googleConfigure']);
+            $router->post('/backup/google/authorize', [BackupController::class, 'googleAuthorize']);
+            $router->post('/backup/google/test', [BackupController::class, 'googleTest']);
+            $router->post('/backup/google/disconnect', [BackupController::class, 'googleDisconnect']);
 
             // Mail Templates
             $router->group([
@@ -149,6 +174,7 @@ class AdminRoute
             ], function ($router) {
                 $router->get('/getOverride', [StatController::class, 'getOverride']);
                 $router->get('/getStats', [StatController::class, 'getStats']);
+                $router->get('/getDetails', [StatController::class, 'getDetails']);
                 $router->get('/getServerLastRank', [StatController::class, 'getServerLastRank']);
                 $router->get('/getServerYesterdayRank', [StatController::class, 'getServerYesterdayRank']);
                 $router->get('/getOrder', [StatController::class, 'getOrder']);
@@ -168,7 +194,7 @@ class AdminRoute
             ], function ($router) {
                 $router->get('/fetch', [NoticeController::class, 'fetch']);
                 $router->post('/save', [NoticeController::class, 'save']);
-                $router->post('/update', [NoticeController::class, 'update']);
+                $router->post('/update', [NoticeController::class, 'save']);
                 $router->post('/drop', [NoticeController::class, 'drop']);
                 $router->post('/show', [NoticeController::class, 'show']);
                 $router->post('/sort', [NoticeController::class, 'sort']);

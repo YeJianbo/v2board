@@ -273,6 +273,9 @@ fi
 mkdir -p "$(dirname "${NGINX_SITE}")" "$(dirname "${SUPERVISOR_CONF}")" /var/log/supervisor
 
 cat >"${NGINX_SITE}" <<EOF
+log_format v2board_safe '\$remote_addr - \$remote_user [\$time_local] "\$request_method \$uri \$server_protocol" '
+                        '\$status \$body_bytes_sent "\$http_referer" "\$http_user_agent"';
+
 server {
     listen 80;
     listen [::]:80;
@@ -292,7 +295,7 @@ server {
     location ~ /\.(?!well-known).* { deny all; }
     location ~* \.(?:css|js)$ { expires 1h; access_log off; }
     location ~* \.(?:gif|jpe?g|png|webp|svg|ico|woff2?)$ { expires 30d; access_log off; }
-    access_log /var/log/nginx/v2board.access.log;
+    access_log /var/log/nginx/v2board.access.log v2board_safe;
     error_log /var/log/nginx/v2board.error.log;
 }
 EOF

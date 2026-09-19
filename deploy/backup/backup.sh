@@ -7,6 +7,7 @@ SITE_ROOT="${V2BOARD_SITE_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../..
 TYPE="${V2BOARD_BACKUP_TYPE:-database}"
 OUTPUT_DIR="${V2BOARD_BACKUP_PATH:-${SITE_ROOT}/storage/app/backups}"
 REMOTE="${V2BOARD_BACKUP_REMOTE:-}"
+RCLONE_CONFIG_FILE="${V2BOARD_BACKUP_RCLONE_CONFIG:-}"
 KEEP_DAYS="${V2BOARD_BACKUP_KEEP_DAYS:-14}"
 STATUS_FILE="${V2BOARD_BACKUP_STATUS_FILE:-${SITE_ROOT}/storage/app/backup/status.json}"
 LOCK_FILE="${V2BOARD_BACKUP_LOCK_FILE:-${SITE_ROOT}/storage/app/backup/backup.lock}"
@@ -14,7 +15,8 @@ LOCK_FILE="${V2BOARD_BACKUP_LOCK_FILE:-${SITE_ROOT}/storage/app/backup/backup.lo
 usage() {
   cat <<'EOF'
 Usage: backup.sh [--type database|migration] [--output-dir PATH]
-                 [--remote RCLONE_REMOTE] [--keep-days DAYS]
+                 [--remote RCLONE_REMOTE] [--rclone-config FILE]
+                 [--keep-days DAYS]
 
 Examples:
   backup.sh --type database
@@ -32,6 +34,7 @@ while (($#)); do
     --type) TYPE="${2:?missing value}"; shift 2 ;;
     --output-dir) OUTPUT_DIR="${2:?missing value}"; shift 2 ;;
     --remote) REMOTE="${2:?missing value}"; shift 2 ;;
+    --rclone-config) RCLONE_CONFIG_FILE="${2:?missing value}"; shift 2 ;;
     --keep-days) KEEP_DAYS="${2:?missing value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -50,6 +53,10 @@ if [[ ! -f "${SITE_ROOT}/.env" ]]; then
   echo "Invalid site root: ${SITE_ROOT}" >&2
   exit 1
 fi
+if [[ -n "${REMOTE}" && -z "${V2BOARD_BACKUP_PASSWORD:-}" ]]; then
+  echo "Remote backup requires V2BOARD_BACKUP_PASSWORD; refusing to upload plaintext." >&2
+  exit 2
+fi
 
 mkdir -p "${OUTPUT_DIR}" "$(dirname "${STATUS_FILE}")" "$(dirname "${LOCK_FILE}")"
 exec 9>"${LOCK_FILE}"
@@ -61,6 +68,7 @@ fi
 STARTED_AT="$(date --iso-8601=seconds)"
 BACKUP_FILE=""
 REMOTE_FILE=""
+UPLOAD_FILE=""
 
 write_status() {
   local status="$1" message="$2" completed_at="${3:-}"
@@ -136,16 +144,34 @@ else
   rm -rf "${EXPORT_DIR}"
 fi
 
+UPLOAD_FILE="${BACKUP_FILE}"
+if [[ -n "${REMOTE}" && "${TYPE}" == "database" ]]; then
+  UPLOAD_FILE="${BACKUP_FILE}.enc"
+  openssl enc -aes-256-cbc -salt -pbkdf2 -iter 250000 \
+    -in "${BACKUP_FILE}" \
+    -out "${UPLOAD_FILE}" \
+    -pass env:V2BOARD_BACKUP_PASSWORD
+  chmod 600 "${UPLOAD_FILE}"
+fi
+
 if [[ -n "${REMOTE}" ]]; then
   if ! command -v rclone >/dev/null 2>&1; then
     echo "rclone is required for remote backup." >&2
     exit 1
   fi
-  REMOTE_FILE="${REMOTE%/}/$(basename "${BACKUP_FILE}")"
-  rclone copyto "${BACKUP_FILE}" "${REMOTE_FILE}" --checkers 2 --transfers 1 --retries 3 --low-level-retries 10
-  rclone delete "${REMOTE%/}" --min-age "${KEEP_DAYS}d" --include 'v2board-database-*.sql.gz' --include 'v2board-migration-*.tar.gz' --include 'v2board-migration-*.tar.gz.enc' || true
+  RCLONE_CONFIG_ARGS=()
+  if [[ -n "${RCLONE_CONFIG_FILE}" ]]; then
+    if [[ ! -r "${RCLONE_CONFIG_FILE}" ]]; then
+      echo "Dedicated rclone config is not readable: ${RCLONE_CONFIG_FILE}" >&2
+      exit 1
+    fi
+    RCLONE_CONFIG_ARGS=(--config "${RCLONE_CONFIG_FILE}")
+  fi
+  REMOTE_FILE="${REMOTE%/}/$(basename "${UPLOAD_FILE}")"
+  rclone copyto "${UPLOAD_FILE}" "${REMOTE_FILE}" "${RCLONE_CONFIG_ARGS[@]}" --checkers 2 --transfers 1 --retries 3 --low-level-retries 10
+  rclone delete "${REMOTE%/}" "${RCLONE_CONFIG_ARGS[@]}" --min-age "${KEEP_DAYS}d" --include 'v2board-database-*.sql.gz' --include 'v2board-database-*.sql.gz.enc' --include 'v2board-migration-*.tar.gz' --include 'v2board-migration-*.tar.gz.enc' || true
 fi
 
-find "${OUTPUT_DIR}" -maxdepth 1 -type f \( -name 'v2board-database-*.sql.gz' -o -name 'v2board-migration-*.tar.gz' -o -name 'v2board-migration-*.tar.gz.enc' -o -name '*.sha256' \) -mtime "+${KEEP_DAYS}" -delete
+find "${OUTPUT_DIR}" -maxdepth 1 -type f \( -name 'v2board-database-*.sql.gz' -o -name 'v2board-database-*.sql.gz.enc' -o -name 'v2board-migration-*.tar.gz' -o -name 'v2board-migration-*.tar.gz.enc' -o -name '*.sha256' \) -mtime "+${KEEP_DAYS}" -delete
 write_status success "Backup completed" "$(date --iso-8601=seconds)"
 echo "Backup completed: ${BACKUP_FILE}"

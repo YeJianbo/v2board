@@ -9,7 +9,6 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\OrderService;
-use App\Services\PlanService;
 use App\Services\UserService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -229,11 +228,11 @@ class OrderController extends Controller
             $order->user_id = $user->id;
             $order->plan_id = $plan->id;
             $period = $request->input('period');
-            $order->period = PlanService::getPeriodKey((string) $period);
+            $order->period = (string) $period;
             $order->trade_no = Helper::guid();
             $order->total_amount = $request->input('total_amount');
 
-            if (PlanService::getPeriodKey((string) $order->period) === Plan::PERIOD_RESET_TRAFFIC) {
+            if ($order->period === 'reset_price') {
                 $order->type = Order::TYPE_RESET_TRAFFIC;
             } else if ($user->plan_id !== NULL && $order->plan_id !== $user->plan_id) {
                 $order->type = Order::TYPE_UPGRADE;

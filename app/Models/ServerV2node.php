@@ -19,5 +19,6 @@ class ServerV2node extends Model
         'network_settings' => 'array',
         'encryption_settings' => 'array',
         'padding_scheme' => 'array',
+        'ravel_settings' => 'array',
     ];
 }

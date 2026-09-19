@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\V1\Server;
 
 use App\Http\Controllers\Controller;
+use App\Services\RavelCredentialService;
 use App\Services\ServerService;
 use App\Services\UserService;
 use App\Utils\CacheKey;
@@ -26,7 +27,9 @@ class UniProxyController extends Controller
             return $configValue;
         }
 
-        $dbValue = DB::table('v2_settings')->where('name', $key)->value('value');
+        $dbValue = Cache::remember('panel_setting:' . $key, 60, static function () use ($key) {
+            return DB::table('v2_settings')->where('name', $key)->value('value');
+        });
         if ($dbValue !== null && $dbValue !== '') {
             return $dbValue;
         }
@@ -34,9 +37,51 @@ class UniProxyController extends Controller
         return $default;
     }
 
+    private function etagMatches(Request $request, string $etag): bool
+    {
+        $header = (string)$request->header('If-None-Match', '');
+        foreach (explode(',', $header) as $candidate) {
+            $candidate = trim($candidate);
+            if (str_starts_with($candidate, 'W/')) {
+                $candidate = substr($candidate, 2);
+            }
+            if (trim($candidate, "\"") === $etag || $candidate === '*') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function encodedUserPayload(bool $messagePack): string
+    {
+        $groupIds = array_values(array_unique(array_map('intval', (array)$this->nodeInfo->group_id)));
+        sort($groupIds);
+        $format = $messagePack ? 'msgpack' : 'json';
+        $cacheKey = 'server_user_payload:' . $format . ':' . sha1(json_encode($groupIds));
+
+        return Cache::remember($cacheKey, 15, function () use ($groupIds, $messagePack) {
+            $users = $this->serverService->getAvailableUsers($groupIds)
+                ->map(static function ($user) {
+                    return array_filter($user->toArray(), static function ($value) {
+                        return $value !== null;
+                    });
+                })
+                ->values()
+                ->toArray();
+            $response = ['users' => $users];
+            if ($messagePack) {
+                return (new Packer())->pack($response);
+            }
+            return json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        });
+    }
+
     public function __construct(Request $request)
     {
-        $token = $request->input('token');
+        $token = $request->bearerToken();
+        if ($token === null || $token === '') {
+            $token = $request->input('token');
+        }
         if (empty($token)) {
             abort(500, 'token is null');
         }
@@ -55,33 +100,27 @@ class UniProxyController extends Controller
     // 后端获取用户
     public function user(Request $request)
     {
-        ini_set('memory_limit', -1);
         Cache::put(CacheKey::get('SERVER_' . strtoupper($this->nodeType) . '_LAST_CHECK_AT', $this->nodeInfo->id), time(), 3600);
-        $users = $this->serverService->getAvailableUsers($this->nodeInfo->group_id)
-            ->map(function ($user) {
-                return array_filter($user->toArray(), function ($v) {
-                    return !is_null($v);
-                });
-            })->toArray();
-
-        $response['users'] = $users;
-        if (strpos($request->header('X-Response-Format'), 'msgpack') !== false) {
-            $packer = new Packer();
-            $response = $packer->pack($response);
-            $eTag = sha1($response);
-            if (strpos($request->header('If-None-Match'), $eTag) !== false) {
-                abort(304);
+        $messagePack = strpos((string)$request->header('X-Response-Format', ''), 'msgpack') !== false;
+        if ($this->nodeType === 'v2node' && (string) $this->nodeInfo->protocol === 'ravel') {
+            $users = $this->serverService->getAvailableUsers($this->nodeInfo->group_id);
+            $payload = ['users' => (new RavelCredentialService())->userPayloads($this->nodeInfo, $users)];
+            if ($messagePack) {
+                return response((new Packer())->pack($payload), 200, [
+                    'Content-Type' => 'application/x-msgpack',
+                    'Cache-Control' => 'private, no-store',
+                ]);
             }
-
-            return response($response, 200, ['Content-Type' => 'application/x-msgpack'])->header('ETag', "\"{$eTag}\"");
-        } else {
-            $eTag = sha1(json_encode($response));
-            if (strpos($request->header('If-None-Match'), $eTag) !== false) {
-                abort(304);
-            }
-
-            return response($response)->header('ETag', "\"{$eTag}\"");
+            return response()->json($payload)->header('Cache-Control', 'private, no-store');
         }
+        $response = $this->encodedUserPayload($messagePack);
+        $eTag = sha1($response);
+        if ($this->etagMatches($request, $eTag)) {
+            return response('', 304)->header('ETag', "\"{$eTag}\"");
+        }
+
+        $contentType = $messagePack ? 'application/x-msgpack' : 'application/json; charset=UTF-8';
+        return response($response, 200, ['Content-Type' => $contentType])->header('ETag', "\"{$eTag}\"");
     }
 
     // 后端提交数据
@@ -315,8 +354,8 @@ class UniProxyController extends Controller
             $response['routes'] = $this->serverService->getRoutes($this->nodeInfo['route_id']);
         }
         $eTag = sha1(json_encode($response));
-        if (strpos($request->header('If-None-Match'), $eTag) !== false) {
-            abort(304);
+        if ($this->etagMatches($request, $eTag)) {
+            return response('', 304)->header('ETag', "\"{$eTag}\"");
         }
 
         return response($response)->header('ETag', "\"{$eTag}\"");

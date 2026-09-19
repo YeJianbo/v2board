@@ -21,13 +21,34 @@ class ServerController extends Controller
             $serverService = new ServerService();
             $servers = $serverService->getAvailableServers($user);
         }
+        $containsRavelCredentials = $this->containsRavelCredentials($servers);
+        if ($containsRavelCredentials) {
+            return response([
+                'data' => $servers
+            ])->header('Cache-Control', 'private, no-store');
+        }
+
         $eTag = sha1(json_encode(array_column($servers, 'cache_key')));
-        if (strpos($request->header('If-None-Match'), $eTag) !== false ) {
+        if (strpos((string) $request->header('If-None-Match'), $eTag) !== false) {
             abort(304);
         }
 
         return response([
             'data' => $servers
         ])->header('ETag', "\"{$eTag}\"");
+    }
+
+    private function containsRavelCredentials(array $servers): bool
+    {
+        foreach ($servers as $server) {
+            if (
+                (string) ($server['protocol'] ?? '') === 'ravel'
+                && !empty($server['ravel_credentials'])
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
